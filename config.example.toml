@@ -35,3 +35,9 @@ max_image_megabytes = 8
 
 # 打开网页时返回的正文上限
 max_text_chars = 8000
+
+[weather]
+enabled = false # 单独授权的按需查询；没有后台轮询/主动播报
+location_name = "" # 显示名称；不根据名称或IP自动查坐标
+latitude = 0.0 # WGS84纬度：须由管理员填真实公共地点坐标，北纬正
+longitude = 0.0 # WGS84经度：东经正；时间固定按北京时间呈现

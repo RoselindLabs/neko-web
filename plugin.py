@@ -29,10 +29,11 @@ from .retrieval import (bounded_batch, error_status, retrieve, search_filters,
 from .automation_auth import AuthError, read_keys, verify
 from .automation_jobs import JobError, JobService
 from .automation_retrieval import search_data, read_data
+from .weather import WeatherError, WeatherService
 
 
 ANYSEARCH_ENDPOINT = "https://api.anysearch.com/mcp"
-CLIENT_HEADER = "neko-web/1.9.0"
+CLIENT_HEADER = "neko-web/1.10.0"
 VERTICAL_DOMAINS = {
     "academic",
     "agriculture",
@@ -163,12 +164,29 @@ class AutomationConfig(PluginConfigBase):
     daily_read_max: int = Field(default=6, ge=0, description='每客户端每日后台正文读取，0不限')
 
 
+class WeatherConfig(PluginConfigBase):
+    """Administrator-selected public location; no IP lookup or autonomous polling."""
+
+    __ui_label__ = '按需天气'
+    __ui_order__ = 2
+    enabled: bool = Field(default=False, description='允许按需查询配置地点的天气；不定时请求/播报，不增加主动唤醒或模型调用')
+    location_name: str = Field(default='', max_length=80, description='地点显示名称，由管理员设置；不是用户当前位置，也不用于自动地名搜索',
+                               json_schema_extra={'label':'天气地点名称'})
+    latitude: float = Field(default=0.0, ge=-90, le=90, allow_inf_nan=False,
+                            description='WGS84纬度，北纬为正；只有名称不会解析坐标，须与经度一起设置',
+                            json_schema_extra={'label':'纬度（WGS84）'})
+    longitude: float = Field(default=0.0, ge=-180, le=180, allow_inf_nan=False,
+                             description='WGS84经度，东经为正；只发此公开坐标给天气源，不发聊天/账号/其他Key',
+                             json_schema_extra={'label':'经度（WGS84）'})
+
+
 class NekoWebPluginConfig(PluginConfigBase):
     """Neko Web 插件配置。"""
 
     plugin: PluginSectionConfig = Field(default_factory=PluginSectionConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     automation: AutomationConfig = Field(default_factory=AutomationConfig)
+    weather: WeatherConfig = Field(default_factory=WeatherConfig)
 
 
 class NekoWebPlugin(MaiBotPlugin):
@@ -188,6 +206,7 @@ class NekoWebPlugin(MaiBotPlugin):
         self._work = WorkManager()
         self._automation = None
         self._automation_lock = asyncio.Lock()
+        self._weather = WeatherService()
 
     async def on_unload(self) -> None:
         """处理插件卸载。"""
@@ -210,6 +229,7 @@ class NekoWebPlugin(MaiBotPlugin):
             self._originals.clear()
             self._texts.clear()
             self._work = WorkManager()
+            self._weather = WeatherService()
 
     async def _close_automation(self):
         async with self._automation_lock:
@@ -454,6 +474,38 @@ class NekoWebPlugin(MaiBotPlugin):
             return f'{label} 搜索状态：config_error；代理配置无效，请检查配置。'
         except TimeoutError:
             return f'{label} 搜索状态：timeout；整轮检索超过期限，可能已有请求计费，未自动重试。'
+
+    @Tool(
+        'neko_web_weather',
+        description='按需查管理员配置地点的天气；不定位用户，不自动播报。',
+        timeout_ms=15000,
+        parameters=[ToolParameterInfo(name='day', param_type=ToolParamType.INTEGER,
+            description='0为今天（含当前模型天气）、1明天、2后天；默认0。只查询已配置地点，其他城市用普通搜索。',
+            required=False, enum_values=[0, 1, 2])],
+    )
+    @tracked
+    async def handle_weather(self, day=0, **kwargs):
+        disabled = self._check_enabled()
+        if disabled or not self.config.weather.enabled:
+            return {'success':False, 'status':'disabled', 'content':disabled or '按需天气未启用。'}
+        if any(key in kwargs for key in ('city', 'latitude', 'longitude', 'location', 'place')):
+            return {'success':False, 'status':'invalid_request', 'content':'天气工具只查管理员配置地点；其他城市请用普通搜索，未忽略地点参数发请求。'}
+        config = self.config.weather.model_copy(deep=True)
+        web = self.config.web.model_copy(deep=True)
+        try:
+            async with asyncio.timeout(10):
+                result = await self._weather.query(config, day, self._build_client_options(web))
+            if (self._check_enabled() or self.config.weather != config or self.config.web != web):
+                return {'success':False, 'status':'config_changed', 'content':'天气配置已变化，本次旧结果不提供。'}
+            return result
+        except WeatherError as error:
+            return {'success':False, 'status':error.code, 'content':'天气查询失败：'+str(error)}
+        except TimeoutError:
+            return {'success':False, 'status':'timeout', 'content':'天气查询超过整轮10秒期限，未自动重试。'}
+        except (AnySearchConfigError, ImportError):
+            return {'success':False, 'status':'config_error', 'content':'天气代理配置或依赖无效，未切换搜索供应商。'}
+        except Exception:
+            return {'success':False, 'status':'unavailable', 'content':'天气资料暂不可用，未猜测或改用其他来源。'}
 
     @Tool(
         "neko_web_search",

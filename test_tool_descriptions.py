@@ -15,7 +15,7 @@ class ToolDescriptionTests(TestCase):
             self.tools[name] = {kw.arg: kw.value for kw in node.keywords}
 
     def test_discovery_descriptions_stay_short(self):
-        self.assertEqual(len(self.tools), 9)
+        self.assertEqual(len(self.tools), 10)
         for name, tool in self.tools.items():
             description = ast.literal_eval(tool['description'])
             self.assertLessEqual(len(description), 45, name)

@@ -32,6 +32,7 @@ required = {
     "test_search_routing",
     "test_release",
     "test_images",
+    "test_weather",
 }
 if not required <= groups:
     raise SystemExit(

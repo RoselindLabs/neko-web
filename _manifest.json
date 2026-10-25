@@ -1,9 +1,9 @@
 {
   "manifest_version": 2,
   "id": "neko.web",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "name": "Neko 联网",
-  "description": "搜索公开网页，读取正文和候选图片，由麦麦看图挑选后随回复发送。",
+  "description": "搜索公开网页、读取正文与候选图片；按需查询管理员配置地点的天气，不自动播报。",
   "author": {
     "name": "NekoLaska",
     "url": "https://github.com/znzsofficial"
