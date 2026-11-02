@@ -15,7 +15,7 @@ class ToolDescriptionTests(TestCase):
             self.tools[name] = {kw.arg: kw.value for kw in node.keywords}
 
     def test_discovery_descriptions_stay_short(self):
-        self.assertEqual(len(self.tools), 10)
+        self.assertEqual(len(self.tools), 7)
         for name, tool in self.tools.items():
             description = ast.literal_eval(tool['description'])
             self.assertLessEqual(len(description), 45, name)
@@ -23,8 +23,8 @@ class ToolDescriptionTests(TestCase):
             self.assertNotIn('cursor', description, name)
 
     def test_next_cursor_guidance_lives_in_parameter(self):
-        parameters = self.tools['neko_web_images_next']['parameters']
-        description = next(kw.value for kw in parameters.elts[0].keywords if kw.arg == 'description')
+        parameters = self.tools['neko_web_images']['parameters']
+        description = next(kw.value for kw in parameters.elts[1].keywords if kw.arg == 'description')
         self.assertIn('next_cursor', ast.literal_eval(description))
 
     def test_domains_not_required_for_ordinary_search(self):

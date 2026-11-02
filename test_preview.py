@@ -56,7 +56,7 @@ class PreviewTests(IsolatedAsyncioTestCase):
     async def test_pagination_hint_only_when_more_candidates(self):
         result = self.plugin._batch_preview_result(([self.image], [], 'next-token', 5, False), 'test')
         self.assertEqual(result['next_cursor'], 'next-token')
-        self.assertIn('neko_web_images_next(cursor="next-token")', result['content'])
+        self.assertIn('neko_web_images(cursor="next-token")', result['content'])
         result = self.plugin._batch_preview_result(([self.image], [], '', 0, False), 'test')
         self.assertNotIn('neko_web_images_next', result['content'])
 

@@ -182,6 +182,7 @@ async def read_public_page(
     text_limit: int = 8000,
     preview_only: bool = False,
     capture_text: bool = False,
+    include_images: bool = True,
 ) -> PageRead:
     """打开一个公开地址，读取正文并下载其中的图片。"""
 
@@ -196,12 +197,16 @@ async def read_public_page(
     data, content_type, final = await download_public(client, url, policy=active)
     mime = sniff_image(data)
     if mime:
+        if not include_images:
+            return PageRead(final, '', '', [], ['这是图片地址；需要预览时设置include_images=true或使用neko_web_images。'])
         return PageRead(final, "", "", [await decode_image(data, final)], [])
     title, text = page_text(data, content_type, MAX_CAPTURE_CHARS + 1 if capture_text else text_limit)
     captured = text[:MAX_CAPTURE_CHARS] if capture_text else ''
     capture_limited = capture_text and len(text) > MAX_CAPTURE_CHARS
     if capture_text and len(text) > text_limit:
         text = text[:text_limit] + '\n…（正文已截断）'
+    if not include_images:
+        return PageRead(final, title, text, [], [], captured_text=captured, capture_limited=capture_limited)
     images: list[FetchedImage] = []
     notes: list[str] = []
     candidates: list[str] = []

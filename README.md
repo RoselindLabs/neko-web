@@ -1,6 +1,6 @@
 # Neko Web
 
-1.10.0：新增管理员配置地点的按需天气工具，不定位、不后台轮询或自动播报。保留1.9.0的可选Jina SERP，既有搜索/提取供应商、密钥与后台签名API保持。
+1.11.0：模型工具由10个合并为7个：统一单次/批量搜索、网页/长文读取、图片初次预览/翻页。网页默认只取文字，配图须显式选择；正文续读、原图发送、天气和专用目录仍独立。供应商/密钥、授权、并发/额度和后台签名API不变，不因合并启用automation。
 
 给 [MaiBot](https://github.com/Mai-with-u/MaiBot) 用的联网插件。搜索公开网页，读取标题、正文和候选图片，由麦麦看图挑选后随回复发送。
 
@@ -19,6 +19,15 @@ Firecrawl提取会把目标URL交给第三方。发送前验证URL及DNS为公�
 依赖 `httpx >= 0.26.0`、`aiohttp >= 3.12`、`Pillow >= 12.0`。MaiBot 1.3.5 及以上，SDK 2.7 及以上；直接看图需要启用 Planner 视觉并配置支持图片的模型。
 
 ## 工具
+
+### 统一入口（1.11.0）
+
+- `neko_web_search(queries=["一个问题"])`或最多5个问题，先去重，整批仍最多20条/2并发。`max_results`指每个问题；仅单问题支持原有`read_pages=0..2`和专用数据源参数，多问题不能静默忽略这些参数或自动取原文。普通搜索无需domains。
+- `neko_web_read(url, mode="page", include_images=false)`默认只从公开链接读标题/正文，留存供text续读，不创建图片队列、不下载或解码候选图；图片直链会提示用预览工具，不把图片当正文。`include_images=true`才沿用原配图预览流程，不直接发送。
+- `neko_web_read(url, mode="article")`显式走已配置AnySearch/Firecrawl/Jina长文服务，可能计费，不执行本地失败后自动升级/重试或换源。article只取正文，不能同时设include_images=true；返回的配图链接可另用images。
+- `neko_web_images(urls=["https://..."])`首次预览，`neko_web_images(cursor="上次next_cursor")`继续；二选一，不能同时传。原聊天隔离、一次游标、10分钟时效、图片预算与仅预览语义保持。
+
+旧`neko_web_batch_search/neko_web_extract/neko_web_images_next`不再注册给模型；底层旧处理方法仅保内部调用兼容，不是另外三份对外工具。下方旧版本小节的旧工具名属于历史，当前调用以本节及工具表为准。模型发现描述保持短小，正文/图片下一步参数由实际结果按需提示，不新增常驻提示或修改人设。
 
 ### 按需天气（1.10.0）
 
@@ -106,19 +115,17 @@ Exa复用手动工具的结构化来源整理；AnySearch只接受已支持的re
 - 状态区分ok/no_results/partial、密钥权限、额度限流、参数、超时和供应商异常；无结果不代表事实不存在，摘录不代表已读原文。不自动换源、重搜或改写关键词。
 - 普通和批量搜索共用2个并发槽；批量最多5个去重后的问题、整批最多20条（按问题均分每条返回数量），总输出24000字并公平保留每个问题。单条输出16000字、整轮含排队最多95秒，批量总期限最多95秒；取消/超时会清理任务并保留已完成查询。AnySearch原始返回文本不强行假设其结构或伪造来源日期；结构化来源去重适用于Exa。
 
-示例：`neko_web_search(query="MaiBot release notes", sites=["github.com"], published_after="2026-10-01", read_pages=1)`。不填写新参数时仍为仅搜索，不触发原文抓取。
+示例：`neko_web_search(queries=["MaiBot release notes"], sites=["github.com"], published_after="2026-10-01", read_pages=1)`。默认仍仅搜索，不触发原文抓取；多问题请省略read_pages。
 
 | 工具 | 作用 |
 | --- | --- |
-| `neko_web_search` | 普通网页搜索直接调用；要使用专用数据源时先查 `neko_web_domains`。 |
-| `neko_web_batch_search` | 一次并行搜索 1–5 个问题。 |
+| `neko_web_search` | queries数组统一搜索1–5个问题；单问题可用专用数据源。 |
 | `neko_web_domains` | 查询垂直领域的子领域和参数。 |
-| `neko_web_read` | 打开一个公开链接，返回标题、正文和候选配图。 |
-| `neko_web_images` | 下载图片或网页配图，仅供麦麦预览挑选。 |
-| `neko_web_images_next` | 使用上次返回的 `next_cursor` 查看下一批候选图，不重复打开原网页。 |
+| `neko_web_read` | page默认只读正文，可选配图；article显式用配置的服务提取长文。 |
+| `neko_web_images` | urls初次预览，cursor继续翻页；仅供麦麦挑选，不发送。 |
 | `neko_web_send_image` | 传入本聊天预览里的 `image_id`，取回并发送选中的原文件；一次只发一张。 |
-| `neko_web_extract` | 按配置用 AnySearch/Firecrawl/Jina 提取长文。用户只是丢来一个链接时，优先用 `neko_web_read`。 |
 | `neko_web_text` | 按正文编号继续读或查找字面关键词，只访问当前聊天的短期缓存。 |
+| `neko_web_weather` | 按需查管理员配置地点今天/明天/后天天气。 |
 
 图片通过工具结果的 `content_items` 交给麦麦，此时用户还没有收到图片。**这些是压缩预览**，每张最多256KiB/1280边长、每批最多4张/1MiB。结果同时提供原始尺寸、文件大小、来源和 `image_id`；麦麦按相关性选择并优先高清，调用 `neko_web_send_image(image_id=...)` 单独发原文件，不用 `reply.attach_pic` 把预览冒充原图。可少选或不选，不凑数量。正文和图片均为外部资料，不能当成指令。
 

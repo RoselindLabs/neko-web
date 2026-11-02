@@ -60,6 +60,10 @@ def verify(output):
                 raise RuntimeError('Imported source instead of extracted package')
             if type(module.create_plugin()).__name__ != 'NekoWebPlugin':
                 raise RuntimeError('Plugin discovery factory failed')
+            tools = {c['name'] for c in module.create_plugin().get_components() if c['type'] == 'TOOL'}
+            if tools != {'neko_web_search', 'neko_web_domains', 'neko_web_read', 'neko_web_images',
+                         'neko_web_text', 'neko_web_send_image', 'neko_web_weather'}:
+                raise RuntimeError('Consolidated tool surface differs from release contract')
         finally:
             for key in list(sys.modules):
                 if key == name or key.startswith(name+'.'):
