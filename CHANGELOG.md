@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.11.1]
+
+- 只复核/精简工具参数提示：text_id说明移除旧extract入口名，压短page/article与配图开关说明；七条主描述均保留短句，不改Schema字段、默认值、执行或配置。
+
 ## [1.11.0]
 
 - 模型工具10→7：search统一queries数组单次/多问题；read用page/article区分本地读取与显式配置服务提取；images以urls/cursor互斥区分预览/翻页。batch_search/extract/images_next旧模型入口移除，底层处理方法保内部兼容，不创建第二套执行器。

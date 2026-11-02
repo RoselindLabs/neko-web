@@ -33,7 +33,7 @@ from .weather import WeatherError, WeatherService
 
 
 ANYSEARCH_ENDPOINT = "https://api.anysearch.com/mcp"
-CLIENT_HEADER = "neko-web/1.11.0"
+CLIENT_HEADER = "neko-web/1.11.1"
 VERTICAL_DOMAINS = {
     "academic",
     "agriculture",
@@ -942,7 +942,7 @@ class NekoWebPlugin(MaiBotPlugin):
         timeout_ms=5000,
         parameters=[
             ToolParameterInfo(name='text_id', param_type=ToolParamType.STRING,
-                              description='read/extract/搜索附带正文返回的正文编号，仅当前聊天有效', required=True),
+                              description='读取或搜索结果中的text_id，仅当前聊天有效', required=True),
             ToolParameterInfo(name='offset', param_type=ToolParamType.INTEGER,
                               description='从0起的字符位置；续读使用上次next_offset，默认0', required=False),
             ToolParameterInfo(name='keyword', param_type=ToolParamType.STRING,
@@ -1037,10 +1037,10 @@ class NekoWebPlugin(MaiBotPlugin):
                 required=True,
             ),
             ToolParameterInfo(name='mode', param_type=ToolParamType.STRING,
-                              description='page普通打开（默认）；article显式用已配置服务提取长文或动态页，可能计费，不自动换源',
+                              description='page普通读取（默认）；article长文/动态页提取，可能计费',
                               enum_values=['page', 'article'], required=False),
             ToolParameterInfo(name='include_images', param_type=ToolParamType.BOOLEAN,
-                              description='仅page模式可选配图预览，默认false；article的图片链接可另用neko_web_images预览', required=False),
+                              description='仅page模式：true预览配图；默认false只读文字', required=False),
         ],
     )
     async def handle_read_tool(self, url='', mode='page', include_images=False, **kwargs):

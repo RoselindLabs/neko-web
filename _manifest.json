@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "neko.web",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "name": "Neko 联网",
   "description": "搜索公开网页、读取正文与候选图片；按需查询管理员配置地点的天气，不自动播报。",
   "author": {
