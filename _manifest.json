@@ -10,10 +10,10 @@
   },
   "license": "MIT",
   "urls": {
-    "repository": "https://github.com/znzsofficial/neko-web",
-    "homepage": "https://github.com/znzsofficial/neko-web",
-    "documentation": "https://github.com/znzsofficial/neko-web/blob/main/README.md",
-    "issues": "https://github.com/znzsofficial/neko-web/issues"
+    "repository": "https://github.com/RoselindLabs/neko-web",
+    "homepage": "https://github.com/RoselindLabs/neko-web",
+    "documentation": "https://github.com/RoselindLabs/neko-web/blob/main/README.md",
+    "issues": "https://github.com/RoselindLabs/neko-web/issues"
   },
   "host_application": {
     "min_version": "1.3.5",
