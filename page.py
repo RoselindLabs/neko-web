@@ -51,6 +51,7 @@ class PageRead:
     candidates_limited: bool = False
     captured_text: str = ''
     capture_limited: bool = False
+    image_url: bool = False
 
 
 class _TextExtractor(HTMLParser):
@@ -198,7 +199,7 @@ async def read_public_page(
     mime = sniff_image(data)
     if mime:
         if not include_images:
-            return PageRead(final, '', '', [], ['这是图片地址；需要预览时设置include_images=true或使用neko_web_images。'])
+            return PageRead(final, '', '', [], [], image_url=True)
         return PageRead(final, "", "", [await decode_image(data, final)], [])
     title, text = page_text(data, content_type, MAX_CAPTURE_CHARS + 1 if capture_text else text_limit)
     captured = text[:MAX_CAPTURE_CHARS] if capture_text else ''

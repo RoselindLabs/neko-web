@@ -125,3 +125,19 @@ class UnifiedToolsTests(IsolatedAsyncioTestCase):
             self.assertIn(work, self.p._work.tasks)
             await self.p.on_config_update(plugin.CONFIG_RELOAD_SCOPE_SELF, {}, '')
             self.assertTrue(work.cancelled())
+
+    async def test_image_url_returns_type_not_empty_article(self):
+        async def run(action, failure):
+            return await action(None, plugin.Deadline.after(55))
+        self.p._run_public = run
+        page = PageRead('https://example.com/a.png', '', '', [], [], image_url=True)
+        with patch.object(plugin, 'read_public_page', AsyncMock(return_value=page)), \
+             patch.object(self.p._pager, 'create', Mock()) as create:
+            result = await self.p.handle_read_tool(page.final_url, stream_id='chat')
+        self.assertEqual(result['status'], 'image_url')
+        self.assertNotIn('原文状态：ok', result['content'])
+        self.assertNotIn('正文编号', result['content'])
+        self.assertIn('未预览', result['content'])
+        self.assertIn('neko_web_images', result['content'])
+        create.assert_not_called()
+        self.p.ctx.send.image.assert_not_called()
