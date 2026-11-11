@@ -972,7 +972,7 @@ class NekoWebPlugin(MaiBotPlugin):
             ToolParameterInfo(name='offset', param_type=ToolParamType.INTEGER,
                               description='从0起的字符位置；续读使用上次next_offset，默认0', required=False),
             ToolParameterInfo(name='keyword', param_type=ToolParamType.STRING,
-                              description='可选字面关键词，区分大小写；从offset起找首处并读附近正文，最多100字', required=False),
+                              description='可选字面关键词，最多100字，区分大小写；从offset起找首处匹配并读取附近正文', required=False),
             ToolParameterInfo(name='limit', param_type=ToolParamType.INTEGER,
                               description='本次展示100–8000字符，默认4000；不改变留存大小', required=False),
         ],
@@ -997,7 +997,7 @@ class NekoWebPlugin(MaiBotPlugin):
             return {'success': False, 'status': 'invalid_request', 'content': 'offset超出本次留存范围，未联网。'}
         return text_result(document, text_id, offset=offset, limit=limit, keyword=keyword)
 
-    @Tool('neko_web_send_image', description='发送原图：提交本聊天选中图片的原始字节；平台可能转换，不发送压缩预览。', timeout_ms=75000,
+    @Tool('neko_web_send_image', description='发送原图：发送本聊天选中图片的原始字节，不发压缩预览；平台可能转换。', timeout_ms=75000,
           trusted_context='neko.tools.context.v1',
           parameters=[ToolParameterInfo(name='image_id', param_type=ToolParamType.STRING,
                                         description='预览结果中的image_id，原样传入', required=True)])
