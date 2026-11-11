@@ -30,6 +30,20 @@ def tracked(function):
     return call
 
 
+def scoped(function):
+    """Reject missing Host identity before cache access or external work."""
+    @wraps(function)
+    async def call(self, *args, **kwargs):
+        disabled = self._check_enabled()
+        if disabled:
+            return {'success': False, 'status': 'disabled', 'content': disabled}
+        if not self._text_scope(kwargs):
+            return {'success': False, 'status': 'invalid_context',
+                    'content': '可信宿主会话身份缺失或矛盾，未读取缓存、联网或发送。'}
+        return await function(self, *args, **kwargs)
+    return call
+
+
 def bounded_text(text: str, limit: int, notice: str = '\n[内容已截短]') -> str:
     if len(text) <= limit:
         return text

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from maibot_sdk.components import collect_components
 
-from test_support import TestPlugin, plugin, image_bytes
+from test_support import TestPlugin, plugin, image_bytes, host_context
 from neko_web_test.page import PageRead, read_public_page
 
 
@@ -34,12 +34,12 @@ class UnifiedToolsTests(IsolatedAsyncioTestCase):
 
     async def test_one_or_many_searches_preserve_filters_dedup_and_explicit_extraction(self):
         result = await self.p.handle_search_tool(['one', ' one '], sites=['example.com'],
-                                               read_pages=2, stream_id='chat')
+                                               read_pages=2, _host_context=host_context())
         self.assertTrue(result['success'])
         self.assertEqual(self.p._provider_search.call_args.args, ('one', 5, {'includeDomains': ['example.com']}, 2))
         self.assertEqual(self.p._provider_search.call_args.kwargs['scope'], 'chat')
         self.p._provider_search.reset_mock()
-        result = await self.p.handle_search_tool(['one', 'two', 'one'])
+        result = await self.p.handle_search_tool(['one', 'two', 'one'], _host_context=host_context())
         self.assertTrue(result['success'])
         self.assertEqual(self.p._provider_search.await_count, 2)
         self.assertIn('查询：two', result['content'])
@@ -51,7 +51,7 @@ class UnifiedToolsTests(IsolatedAsyncioTestCase):
                                (['one'], {'query': 'ambiguous'}),
                                (['one', 'two'], {'read_pages': 1}),
                                (['one', 'two'], {'domain': 'finance'})]:
-            result = await self.p.handle_search_tool(queries, **fields)
+            result = await self.p.handle_search_tool(queries, _host_context=host_context(), **fields)
             self.assertFalse(result['success'], (queries, fields))
         self.p._provider_search.assert_not_called()
         self.p._call_api.assert_not_called()
@@ -65,39 +65,39 @@ class UnifiedToolsTests(IsolatedAsyncioTestCase):
         with patch.object(plugin, 'read_public_page', AsyncMock(return_value=page)) as reader, \
              patch.object(self.p._pager, 'create', Mock()) as create, \
              patch.object(self.p._pager, 'batch', AsyncMock()) as batch:
-            result = await self.p.handle_read_tool(page.final_url, stream_id='chat')
+            result = await self.p.handle_read_tool(page.final_url, _host_context=host_context())
         self.assertFalse(reader.call_args.kwargs['include_images'])
         create.assert_not_called(); batch.assert_not_called()
         self.assertEqual(result['content_items'], [])
         self.assertTrue(result['text_has_more'])
         self.assertFalse(result['has_more'])
-        more = await self.p.handle_text(result['text_id'], offset=result['next_offset'], stream_id='chat')
+        more = await self.p.handle_text(result['text_id'], offset=result['next_offset'], _host_context=host_context())
         self.assertEqual(more['start'], 8000)
-        self.assertFalse((await self.p.handle_text(result['text_id'], stream_id='other'))['success'])
+        self.assertFalse((await self.p.handle_text(result['text_id'], _host_context=host_context('other')))['success'])
         self.p.ctx.send.image.assert_not_called()
 
     async def test_read_modes_and_explicit_preview_never_auto_switch_or_send(self):
         self.p.handle_read = AsyncMock(return_value={'success': True})
         self.p.handle_extract = AsyncMock(return_value={'success': True})
         for fields in ({'mode': 'auto'}, {'include_images': 'true'}, {'mode': 'article', 'include_images': True}):
-            self.assertFalse((await self.p.handle_read_tool('https://example.com', **fields))['success'])
+            self.assertFalse((await self.p.handle_read_tool('https://example.com', _host_context=host_context(), **fields))['success'])
         self.p.handle_read.assert_not_called(); self.p.handle_extract.assert_not_called()
-        await self.p.handle_read_tool('https://example.com', mode='article', stream_id='chat')
-        self.p.handle_extract.assert_awaited_once_with('https://example.com', stream_id='chat')
-        await self.p.handle_read_tool('https://example.com', include_images=True, stream_id='chat')
-        self.p.handle_read.assert_awaited_once_with('https://example.com', include_images=True, stream_id='chat')
+        await self.p.handle_read_tool('https://example.com', mode='article', _host_context=host_context())
+        self.p.handle_extract.assert_awaited_once_with('https://example.com', _host_context=host_context())
+        await self.p.handle_read_tool('https://example.com', include_images=True, _host_context=host_context())
+        self.p.handle_read.assert_awaited_once_with('https://example.com', include_images=True, _host_context=host_context())
         self.p.ctx.send.image.assert_not_called()
 
     async def test_images_url_or_cursor_routes_exclusively_and_keeps_chat_scope(self):
         self.p.handle_fetch_images = AsyncMock(return_value={'success': True})
         self.p.handle_images_next = AsyncMock(return_value={'success': True})
         for fields in ({}, {'urls': [], 'cursor': 'token'}, {'urls': ['https://example.com'], 'cursor': 'token'}, {'cursor': 1}):
-            self.assertFalse((await self.p.handle_images_tool(**fields))['success'])
+            self.assertFalse((await self.p.handle_images_tool(_host_context=host_context(), **fields))['success'])
         self.p.handle_fetch_images.assert_not_called(); self.p.handle_images_next.assert_not_called()
-        await self.p.handle_images_tool(urls=['https://example.com'], stream_id='chat')
-        await self.p.handle_images_tool(cursor='token', stream_id='chat')
-        self.p.handle_fetch_images.assert_awaited_once_with(['https://example.com'], stream_id='chat')
-        self.p.handle_images_next.assert_awaited_once_with('token', stream_id='chat')
+        await self.p.handle_images_tool(urls=['https://example.com'], _host_context=host_context())
+        await self.p.handle_images_tool(cursor='token', _host_context=host_context())
+        self.p.handle_fetch_images.assert_awaited_once_with(['https://example.com'], _host_context=host_context())
+        self.p.handle_images_next.assert_awaited_once_with('token', _host_context=host_context())
 
     async def test_text_only_download_skips_image_parser_decode_and_candidate_requests(self):
         from neko_web_test import page as page_module
@@ -120,7 +120,7 @@ class UnifiedToolsTests(IsolatedAsyncioTestCase):
             return await action(None, plugin.Deadline.after(55))
         self.p._run_public = run
         with patch.object(plugin, 'read_public_page', side_effect=slow):
-            work = asyncio.create_task(self.p.handle_read_tool('https://example.com', stream_id='chat'))
+            work = asyncio.create_task(self.p.handle_read_tool('https://example.com', _host_context=host_context()))
             await entered.wait()
             self.assertIn(work, self.p._work.tasks)
             await self.p.on_config_update(plugin.CONFIG_RELOAD_SCOPE_SELF, {}, '')
@@ -133,7 +133,7 @@ class UnifiedToolsTests(IsolatedAsyncioTestCase):
         page = PageRead('https://example.com/a.png', '', '', [], [], image_url=True)
         with patch.object(plugin, 'read_public_page', AsyncMock(return_value=page)), \
              patch.object(self.p._pager, 'create', Mock()) as create:
-            result = await self.p.handle_read_tool(page.final_url, stream_id='chat')
+            result = await self.p.handle_read_tool(page.final_url, _host_context=host_context())
         self.assertEqual(result['status'], 'image_url')
         self.assertNotIn('原文状态：ok', result['content'])
         self.assertNotIn('正文编号', result['content'])

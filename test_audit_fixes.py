@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from PIL import Image
 
-from test_support import TestPlugin, plugin, image_bytes
+from test_support import TestPlugin, plugin, image_bytes, host_context
 from images import prepare_image, ImageFetchError, image_urls_in_document
 from preview import PreviewPager
 from originals import OriginalRegistry
@@ -85,8 +85,8 @@ class AuditAsyncTests(IsolatedAsyncioTestCase):
         original = prepare_image(raw, preview.source, preview=False)
         token = self.p._originals.add('chat', preview)
         with patch.object(plugin, 'load_image', AsyncMock(return_value=original)):
-            result = await self.p.handle_send_image(token, stream_id='chat')
-            again = await self.p.handle_send_image(token, stream_id='chat')
+            result = await self.p.handle_send_image(token, _host_context=host_context())
+            again = await self.p.handle_send_image(token, _host_context=host_context())
         self.assertEqual(result['status'], 'sent')
         self.assertFalse(again['success'])
         self.p.ctx.send.image.assert_awaited_once()
@@ -97,7 +97,7 @@ class AuditAsyncTests(IsolatedAsyncioTestCase):
         different = prepare_image(image_bytes(color='blue'), preview.source, preview=False)
         token = self.p._originals.add('chat', preview)
         with patch.object(plugin, 'load_image', AsyncMock(return_value=different)):
-            result = await self.p.handle_send_image(token, stream_id='chat')
+            result = await self.p.handle_send_image(token, _host_context=host_context())
         self.assertEqual(result['status'], 'source_changed')
         self.p.ctx.send.image.assert_not_called()
 
@@ -107,8 +107,8 @@ class AuditAsyncTests(IsolatedAsyncioTestCase):
         token = self.p._originals.add('chat', preview)
         self.p.ctx.send.image.return_value = False
         with patch.object(plugin, 'load_image', AsyncMock(return_value=prepare_image(raw, preview.source, preview=False))):
-            result = await self.p.handle_send_image(token, stream_id='chat')
-            await self.p.handle_send_image(token, stream_id='chat')
+            result = await self.p.handle_send_image(token, _host_context=host_context())
+            await self.p.handle_send_image(token, _host_context=host_context())
         self.assertEqual(result['status'], 'delivery_unconfirmed')
         self.p.ctx.send.image.assert_awaited_once()
 
@@ -116,7 +116,7 @@ class AuditAsyncTests(IsolatedAsyncioTestCase):
         image = prepare_image(image_bytes(), 'https://example.com/a.png')
         token = self.p._originals.add('chat', image)
         with patch.object(plugin, 'load_image', AsyncMock(side_effect=plugin.ImageFetchError('文件超过大小限制'))):
-            result = await self.p.handle_send_image(token, stream_id='chat')
+            result = await self.p.handle_send_image(token, _host_context=host_context())
         self.assertEqual(result['status'], 'original_unavailable')
         self.assertIn(image.source, result['content'])
         self.p.ctx.send.image.assert_not_called()
@@ -213,24 +213,24 @@ class AuditAsyncTests(IsolatedAsyncioTestCase):
             await asyncio.sleep(10)
         self.p.ctx.send.image.side_effect = send
         with patch.object(plugin, 'load_image', AsyncMock(return_value=prepare_image(raw, preview.source, preview=False))):
-            task = asyncio.create_task(self.p.handle_send_image(token, stream_id='chat'))
+            task = asyncio.create_task(self.p.handle_send_image(token, _host_context=host_context()))
             await entered.wait()
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await task
         self.assertEqual(self.p._originals.items[token].state, 'unknown')
-        self.assertFalse((await self.p.handle_send_image(token, stream_id='chat'))['success'])
+        self.assertFalse((await self.p.handle_send_image(token, _host_context=host_context()))['success'])
 
     async def test_wrong_chat_cannot_send_original(self):
         preview = prepare_image(image_bytes(), 'https://example.com/a.png')
         token = self.p._originals.add('chat', preview)
         with patch.object(plugin, 'load_image', AsyncMock()) as load:
-            result = await self.p.handle_send_image(token, stream_id='other')
+            result = await self.p.handle_send_image(token, _host_context=host_context('other'))
         self.assertFalse(result['success'])
         load.assert_not_called()
 
     async def test_batch_errors_have_unsuccessful_tool_status(self):
         self.p._provider_search = AsyncMock(return_value='Exa 搜索状态：auth_error；密钥错误。')
-        result = await self.p.handle_batch_search(['query'])
+        result = await self.p.handle_batch_search(['query'], _host_context=host_context())
         self.assertFalse(result['success'])
         self.assertEqual(result['status'], 'auth_error')

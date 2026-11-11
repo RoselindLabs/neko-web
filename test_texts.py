@@ -8,7 +8,7 @@ from texts import MAX_CAPTURE_CHARS, TextRegistry, capture_document, text_result
 from page import read_public_page
 from providers import extract_firecrawl_document
 from retrieval import retrieve
-from test_support import TestPlugin, plugin
+from test_support import TestPlugin, plugin, host_context
 
 
 class RegistryTests(TestCase):
@@ -170,18 +170,19 @@ class ToolTests(IsolatedAsyncioTestCase):
 
     async def test_read_and_keyword_no_network_no_send(self):
         with patch.object(plugin.httpx, 'AsyncClient', side_effect=AssertionError('network forbidden')):
-            result = await self.p.handle_text(self.token, offset=8000, limit=4000, stream_id='chat-a')
+            result = await self.p.handle_text(self.token, offset=8000, limit=4000, _host_context=host_context('chat-a'))
             self.assertEqual(result['next_offset'], 12000)
             self.assertIn('目标😀', result['content'])
-            found = await self.p.handle_text(self.token, keyword='目标', stream_id='chat-a')
+            found = await self.p.handle_text(self.token, keyword='目标', _host_context=host_context('chat-a'))
             self.assertEqual(found['match_offset'], 9000)
         self.p.ctx.send.image.assert_not_called()
 
     async def test_scope_and_missing_do_not_leak_source(self):
-        for kwargs in [{}, {'stream_id': 'chat-b'}, {'stream_id': []}]:
+        for kwargs in [{}, {'stream_id': 'chat-b'}, {'stream_id': []},
+                       {'_host_context': host_context('chat-b')}]:
             result = await self.p.handle_text(self.token, **kwargs)
             self.assertFalse(result['success'])
-            self.assertEqual(result['status'], 'unavailable')
+            self.assertEqual(result['status'], 'unavailable' if '_host_context' in kwargs else 'invalid_context')
             self.assertNotIn('example.com', result['content'])
 
     async def test_expiry_and_unload_clear_without_network_retry(self):
@@ -190,7 +191,7 @@ class ToolTests(IsolatedAsyncioTestCase):
         token = self.p._texts.create('chat-a', self.doc)
         now[0] = 1
         with patch.object(plugin.httpx, 'AsyncClient', side_effect=AssertionError('must not refetch')):
-            self.assertEqual((await self.p.handle_text(token, stream_id='chat-a'))['status'], 'unavailable')
+            self.assertEqual((await self.p.handle_text(token, _host_context=host_context('chat-a')))['status'], 'unavailable')
         self.p._texts.create('chat-a', self.doc)
         await self.p.on_unload()
         self.assertEqual(self.p._texts.bytes_used, 0)
@@ -200,14 +201,14 @@ class ToolTests(IsolatedAsyncioTestCase):
         for args in [{'offset': True}, {'offset': -1}, {'offset': 999999}, {'offset': '10'},
                      {'keyword': []}, {'keyword': 'x' * 101}, {'limit': True}, {'limit': 99},
                      {'limit': 8001}, {'text_id': []}]:
-            values = {'text_id': self.token, 'stream_id': 'chat-a', **args}
+            values = {'text_id': self.token, '_host_context': host_context('chat-a'), **args}
             result = await self.p.handle_text(**values)
             self.assertEqual(result['status'], 'invalid_request')
 
     async def test_end_empty_keyword_and_not_found_are_explicit(self):
-        result = await self.p.handle_text(self.token, offset=len(self.doc.text), stream_id='chat-a')
+        result = await self.p.handle_text(self.token, offset=len(self.doc.text), _host_context=host_context('chat-a'))
         self.assertFalse(result['has_more'])
-        result = await self.p.handle_text(self.token, keyword='MISSING', stream_id='chat-a')
+        result = await self.p.handle_text(self.token, keyword='MISSING', _host_context=host_context('chat-a'))
         self.assertTrue(result['success'])
         self.assertEqual(result['status'], 'not_found')
 
@@ -215,15 +216,15 @@ class ToolTests(IsolatedAsyncioTestCase):
         await self.p.on_config_update(plugin.CONFIG_RELOAD_SCOPE_SELF, {}, 'new')
         self.assertIsNone(self.p._texts.get('chat-a', self.token))
         self.p.config.plugin.enabled = False
-        self.assertEqual((await self.p.handle_text(self.token, stream_id='chat-a'))['status'], 'disabled')
+        self.assertEqual((await self.p.handle_text(self.token, _host_context=host_context('chat-a')))['status'], 'disabled')
 
     async def test_extract_wires_capture_to_tool(self):
         self.p.config.web.extract_provider = 'firecrawl'
         with patch.object(plugin, 'extract_firecrawl_document', AsyncMock(return_value=self.doc)) as extract:
-            result = await self.p.handle_extract(self.doc.url, stream_id='chat-a')
+            result = await self.p.handle_extract(self.doc.url, _host_context=host_context('chat-a'))
             self.assertEqual(result['total_chars'], len(self.doc.text))
             self.assertEqual(result['end'], 8000)
-            follow = await self.p.handle_text(result['text_id'], keyword='目标', stream_id='chat-a')
+            follow = await self.p.handle_text(result['text_id'], keyword='目标', _host_context=host_context('chat-a'))
             self.assertEqual(follow['match_offset'], 9000)
             extract.assert_awaited_once()
 
@@ -240,7 +241,7 @@ class ToolTests(IsolatedAsyncioTestCase):
             return await action(Client(), plugin.Deadline.after(30))
         self.p._run_public = run
         with patch.object(plugin, 'read_public_page', AsyncMock(return_value=page)):
-            result = await self.p.handle_read(self.doc.url, stream_id='chat-a')
+            result = await self.p.handle_read(self.doc.url, _host_context=host_context('chat-a'))
         self.assertFalse(result['has_more'])
         self.assertTrue(result['text_has_more'])
         self.assertTrue(result['text_id'])

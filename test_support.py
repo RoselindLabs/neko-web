@@ -14,6 +14,12 @@ sys.modules.setdefault(package.__name__, package)
 plugin = importlib.import_module('neko_web_test.plugin')
 
 
+def host_context(scope='chat', platform='qq', **changes):
+    """Host contract without an anchor/account, as in ordinary and Focus calls."""
+    return dict(contract='neko.tools.context.v1', session_id=scope, stream_id=scope,
+                platform=platform, account_id='', group_id='', user_id='test-user') | changes
+
+
 class TestPlugin(plugin.NekoWebPlugin):
     @property
     def config(self):

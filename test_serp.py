@@ -6,7 +6,7 @@ import httpx
 from providers import ProviderError, search_jina_results
 from retrieval import organize_results, retrieve
 from runtime import response_status
-from test_support import TestPlugin, plugin
+from test_support import TestPlugin, plugin, host_context
 from neko_web_test import automation_retrieval
 
 
@@ -90,7 +90,7 @@ class ToolTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.p.config.web.manual_search_provider, 'configured')
         with patch('neko_web_test.retrieval.search_exa_results', AsyncMock(return_value=[])) as exa, \
                 patch('neko_web_test.retrieval.search_jina_results', AsyncMock()) as jina:
-            result = await self.p.handle_search('query')
+            result = await self.p.handle_search('query', _host_context=host_context())
             self.assertEqual(result['status'], 'no_results')
             exa.assert_awaited_once()
             jina.assert_not_called()
@@ -101,7 +101,7 @@ class ToolTests(IsolatedAsyncioTestCase):
             self.p.config.web.jina_search_engine = engine
             with patch('neko_web_test.retrieval.search_jina_results', AsyncMock(return_value=[{'url': 'https://example.com'}])) as jina, \
                     patch('neko_web_test.retrieval.search_exa_results', AsyncMock()) as exa:
-                result = await self.p.handle_search('query')
+                result = await self.p.handle_search('query', _host_context=host_context())
                 self.assertTrue(result['success'])
                 self.assertIn(f'Jina SERP ({engine})', result['content'])
                 self.assertEqual(jina.call_args.args[-1], engine)
@@ -110,8 +110,8 @@ class ToolTests(IsolatedAsyncioTestCase):
     async def test_filters_fail_before_search_without_silently_ignoring(self):
         self.p.config.web.manual_search_provider = 'jina_serp'
         with patch('neko_web_test.retrieval.search_jina_results', AsyncMock()) as jina:
-            for call in [self.p.handle_search('query', sites=['example.com']),
-                         self.p.handle_batch_search(['query'], published_after='2026-01-01')]:
+            for call in [self.p.handle_search('query', sites=['example.com'], _host_context=host_context()),
+                         self.p.handle_batch_search(['query'], published_after='2026-01-01', _host_context=host_context())]:
                 result = await call
                 self.assertEqual(result['status'], 'unsupported')
             jina.assert_not_called()
@@ -120,7 +120,7 @@ class ToolTests(IsolatedAsyncioTestCase):
         self.p.config.web.manual_search_provider = 'jina_serp'
         with patch('neko_web_test.retrieval.search_jina_results', AsyncMock(return_value=[])) as jina, \
                 patch('neko_web_test.retrieval.extract_jina_document', AsyncMock()) as extract:
-            result = await self.p.handle_batch_search(['a', 'b'])
+            result = await self.p.handle_batch_search(['a', 'b'], _host_context=host_context())
             self.assertTrue(result['success'])
             self.assertEqual(jina.await_count, 2)
             extract.assert_not_called()
@@ -129,7 +129,7 @@ class ToolTests(IsolatedAsyncioTestCase):
         self.p.config.web.manual_search_provider = 'jina_serp'
         with patch('neko_web_test.retrieval.search_jina_results', AsyncMock(side_effect=plugin.ProviderError('mismatch', 'provider_contract_mismatch'))), \
                 patch('neko_web_test.retrieval.search_exa_results', AsyncMock()) as exa:
-            result = await self.p.handle_search('query')
+            result = await self.p.handle_search('query', _host_context=host_context())
             self.assertFalse(result['success'])
             self.assertEqual(result['status'], 'provider_contract_mismatch')
             exa.assert_not_called()
@@ -146,7 +146,7 @@ class ToolTests(IsolatedAsyncioTestCase):
         self.p.config.web.manual_search_provider = 'jina_serp'
         self.p._call_api = AsyncMock(return_value='vertical')
         with patch('neko_web_test.retrieval.search_jina_results', AsyncMock()) as jina:
-            await self.p.handle_search('query', domain='finance', sub_domain='stock')
+            await self.p.handle_search('query', domain='finance', sub_domain='stock', _host_context=host_context())
             self.p._call_api.assert_awaited_once()
             jina.assert_not_called()
 
@@ -164,7 +164,7 @@ class ToolTests(IsolatedAsyncioTestCase):
         self.p.config.web.manual_search_provider = 'jina_serp'
         self.p.config.web.extract_provider = 'firecrawl'
         with patch.object(plugin, 'retrieve', AsyncMock(return_value='搜索状态：ok')) as retrieve_mock:
-            await self.p.handle_search('query', read_pages=1, stream_id='a')
+            await self.p.handle_search('query', read_pages=1, _host_context=host_context('a'))
             args = retrieve_mock.call_args
             self.assertIsNot(args.args[0], args.kwargs['body_client'])
             self.assertEqual(args.kwargs['backend'], 'jina_serp')

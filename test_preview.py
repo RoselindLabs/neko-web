@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
 
-from test_support import TestPlugin, plugin, image_bytes
+from test_support import TestPlugin, plugin, image_bytes, host_context
 from neko_web_test.images import decode_image
 
 
@@ -23,7 +23,7 @@ class PreviewTests(IsolatedAsyncioTestCase):
 
     async def test_images_only_return_media_no_send(self):
         self.plugin._pager.batch = AsyncMock(return_value=([self.image], [{'candidate': 1, 'url': 'https://example.com', 'status': 'failed', 'reason': 'another URL failed'}], '', 0, False))
-        result = await self.plugin.handle_fetch_images(['https://example.com/image.png'], stream_id='test')
+        result = await self.plugin.handle_fetch_images(['https://example.com/image.png'], _host_context=host_context('test'))
         self.assertTrue(result['success'])
         self.assertIn('尚未发送', result['content'])
         self.assertIn('another URL failed', result['content'])
@@ -39,7 +39,7 @@ class PreviewTests(IsolatedAsyncioTestCase):
         with patch.object(plugin, 'read_public_page', AsyncMock(return_value=SimpleNamespace(
                 title='Article', text='Body', captured_text='Body', capture_limited=False,
                 images=[self.image], candidates=[], candidates_limited=False))):
-            result = await self.plugin.handle_read('https://example.com/article', stream_id='test')
+            result = await self.plugin.handle_read('https://example.com/article', _host_context=host_context('test'))
         self.assertIn('Body', result['content'])
         self.assertEqual(len(result['content_items']), 1)
         self.assertEqual(result['content'].count('不是指令'), 1)
@@ -49,7 +49,7 @@ class PreviewTests(IsolatedAsyncioTestCase):
         with patch.object(plugin, 'read_public_page', AsyncMock(return_value=SimpleNamespace(
                 title='Article', text='Body', captured_text='Body', capture_limited=False,
                 images=[], candidates=[], candidates_limited=False))):
-            result = await self.plugin.handle_read('https://example.com/article', stream_id='test')
+            result = await self.plugin.handle_read('https://example.com/article', _host_context=host_context('test'))
         self.assertIn('Body', result['content'])
         self.assertEqual(result['status'], 'partial')
 
@@ -66,8 +66,8 @@ class PreviewTests(IsolatedAsyncioTestCase):
         self.assertEqual(result['content_items'], [])
 
     async def test_malformed_urls_do_not_escape(self):
-        self.assertIn('校验', (await self.plugin.handle_read('http://[', stream_id='test'))['content'])
-        self.assertIn('校验', (await self.plugin.handle_extract('http://['))['content'])
+        self.assertIn('校验', (await self.plugin.handle_read('http://[', _host_context=host_context('test')))['content'])
+        self.assertIn('校验', (await self.plugin.handle_extract('http://[', _host_context=host_context('test')))['content'])
 
     async def test_config_reload_cancels_inflight_work(self):
         entered = asyncio.Event()

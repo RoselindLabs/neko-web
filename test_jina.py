@@ -8,7 +8,7 @@ import httpx
 from providers import ProviderError, extract_jina_document
 from retrieval import retrieve
 from texts import MAX_CAPTURE_CHARS, capture_document
-from test_support import TestPlugin, plugin
+from test_support import TestPlugin, plugin, host_context
 
 
 def envelope(content='正文', **page):
@@ -136,7 +136,7 @@ class RoutingTests(IsolatedAsyncioTestCase):
         self.p.config.web.extract_provider = 'firecrawl'
         with patch.object(plugin, 'extract_firecrawl_document', AsyncMock(return_value=self.doc)) as fire, \
                 patch.object(plugin, 'extract_jina_document', AsyncMock()) as jina:
-            await self.p.handle_extract(self.doc.url, stream_id='a')
+            await self.p.handle_extract(self.doc.url, _host_context=host_context('a'))
             fire.assert_awaited_once()
             jina.assert_not_called()
 
@@ -144,10 +144,10 @@ class RoutingTests(IsolatedAsyncioTestCase):
         self.p.config.web.extract_provider = 'jina'
         with patch.object(plugin, 'extract_jina_document', AsyncMock(return_value=self.doc)) as jina, \
                 patch.object(plugin, 'extract_firecrawl_document', AsyncMock()) as fire:
-            result = await self.p.handle_extract(self.doc.url, stream_id='a')
+            result = await self.p.handle_extract(self.doc.url, _host_context=host_context('a'))
             self.assertTrue(result['success'])
             self.assertEqual(result['total_chars'], len(self.doc.text))
-            follow = await self.p.handle_text(result['text_id'], keyword='目标', stream_id='a')
+            follow = await self.p.handle_text(result['text_id'], keyword='目标', _host_context=host_context('a'))
             self.assertEqual(follow['match_offset'], 12000)
             fire.assert_not_called()
             jina.assert_awaited_once()
@@ -157,7 +157,7 @@ class RoutingTests(IsolatedAsyncioTestCase):
         for exc, code in [(plugin.ProviderError('HTTP 429'), 'quota_or_rate_limit'), (TimeoutError(), 'timeout')]:
             with patch.object(plugin, 'extract_jina_document', AsyncMock(side_effect=exc)), \
                     patch.object(plugin, 'extract_firecrawl_document', AsyncMock()) as fire:
-                result = await self.p.handle_extract(self.doc.url, stream_id='a')
+                result = await self.p.handle_extract(self.doc.url, _host_context=host_context('a'))
                 self.assertFalse(result['success'])
                 self.assertEqual(result['status'], code)
                 self.assertFalse(self.p._texts.entries)

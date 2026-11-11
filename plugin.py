@@ -23,7 +23,7 @@ from .providers import ProviderError, extract_firecrawl_document, extract_jina_d
 from .texts import MAX_SLICE_CHARS, TextRegistry, capture_document, text_result
 from .public_http import validate_url
 from .originals import OriginalRegistry
-from .runtime import Deadline, WorkManager, bounded_text, tracked
+from .runtime import Deadline, WorkManager, bounded_text, scoped, tracked
 from .retrieval import (bounded_batch, error_status, retrieve, search_filters,
                          MAX_SEARCH_CONCURRENCY, MAX_READ_PAGES)
 from .automation_auth import AuthError, read_keys, verify
@@ -33,7 +33,7 @@ from .weather import WeatherError, WeatherService
 
 
 ANYSEARCH_ENDPOINT = "https://api.anysearch.com/mcp"
-CLIENT_HEADER = "neko-web/1.11.2"
+CLIENT_HEADER = "neko-web/1.11.3"
 VERTICAL_DOMAINS = {
     "academic",
     "agriculture",
@@ -437,8 +437,21 @@ class NekoWebPlugin(MaiBotPlugin):
 
     @staticmethod
     def _text_scope(kwargs):
-        value = kwargs.get('stream_id') or kwargs.get('session_id') or kwargs.get('chat_id') or ''
-        return value.strip() if isinstance(value, str) and len(value) <= 512 else ''
+        # Only the opt-in Host contract overwrites model-supplied identity.
+        # Session IDs are opaque; retain the existing cache key unchanged.
+        context = kwargs.get('_host_context')
+        if not isinstance(context, dict) or context.get('contract') != 'neko.tools.context.v1':
+            return ''
+        # Ordinary and Focus execution contexts can legitimately lack an anchor
+        # and account. Only the Host-owned session selects these caches/routes.
+        for key in ('session_id', 'stream_id'):
+            value = context.get(key)
+            if (not isinstance(value, str) or not 0 < len(value) <= 512
+                    or value != value.strip() or any(ord(c) < 32 for c in value)):
+                return ''
+        if context['session_id'] != context['stream_id']:
+            return ''
+        return context['stream_id']
 
     def _document_result(self, document, scope, limit):
         token = self._texts.create(scope, document)
@@ -509,6 +522,7 @@ class NekoWebPlugin(MaiBotPlugin):
 
     @Tool(
         "neko_web_search",
+        trusted_context="neko.tools.context.v1",
         description="搜索一个或多个问题；已有链接用neko_web_read。",
         timeout_ms=105000,
         parameters=[
@@ -553,6 +567,7 @@ class NekoWebPlugin(MaiBotPlugin):
             ),
         ],
     )
+    @scoped
     async def handle_search_tool(
         self, queries=None, max_results=0, sites=None, published_after='', published_before='',
         read_pages=0, domain='', sub_domain='', sub_domain_params=None, **kwargs,
@@ -587,6 +602,7 @@ class NekoWebPlugin(MaiBotPlugin):
         )
 
     @tracked
+    @scoped
     async def handle_search(
         self,
         query: str = "",
@@ -695,6 +711,7 @@ class NekoWebPlugin(MaiBotPlugin):
         return parsed, None
 
     @tracked
+    @scoped
     async def handle_batch_search(self, queries: List[str] | None = None, max_results: int = 0,
                                   sites: List[str] | None = None, published_after: str = "",
                                   published_before: str = "", **kwargs: Any) -> str:
@@ -771,6 +788,7 @@ class NekoWebPlugin(MaiBotPlugin):
 
     @Tool(
         "neko_web_images",
+        trusted_context="neko.tools.context.v1",
         description="预览候选图片或继续翻页，供挑选；不会直接发送。",
         timeout_ms=65000,
         parameters=[
@@ -785,6 +803,7 @@ class NekoWebPlugin(MaiBotPlugin):
                               description='继续预览时只传上次next_cursor；与urls二选一', required=False),
         ],
     )
+    @scoped
     async def handle_images_tool(self, urls=None, cursor='', **kwargs):
         if not isinstance(cursor, str) or (urls is not None and cursor) or (urls is None and not cursor):
             return {'success': False, 'status': 'invalid_request',
@@ -794,13 +813,14 @@ class NekoWebPlugin(MaiBotPlugin):
         return await self.handle_fetch_images(urls, **kwargs)
 
     @tracked
+    @scoped
     async def handle_fetch_images(self, urls: List[str] | None = None, **kwargs: Any) -> str | dict[str, Any]:
         """下载公开图片并返回视觉候选，不直接发送。"""
 
         disabled_message = self._check_enabled()
         if disabled_message:
             return disabled_message
-        stream_id = str(kwargs.get("stream_id") or kwargs.get("session_id") or kwargs.get("chat_id") or "").strip()
+        stream_id = self._text_scope(kwargs)
         if not stream_id:
             return "没有当前聊天，无法建立图片预览。"
         if not isinstance(urls, list) or not urls:
@@ -826,11 +846,12 @@ class NekoWebPlugin(MaiBotPlugin):
         return await self._run_public(action, "网络图片获取失败")
 
     @tracked
+    @scoped
     async def handle_images_next(self, cursor: str = "", **kwargs: Any) -> str | dict[str, Any]:
         disabled = self._check_enabled()
         if disabled:
             return disabled
-        scope = str(kwargs.get("stream_id") or kwargs.get("session_id") or kwargs.get("chat_id") or "").strip()
+        scope = self._text_scope(kwargs)
         if not scope or not isinstance(cursor, str) or not cursor or len(cursor) > 128:
             return "无法继续预览：缺少当前聊天或有效游标。"
         async def action(client, deadline):
@@ -857,6 +878,7 @@ class NekoWebPlugin(MaiBotPlugin):
         return result
 
     @tracked
+    @scoped
     async def handle_extract(self, url: str = "", **kwargs: Any) -> str | dict[str, Any]:
         """提取网页正文。"""
 
@@ -938,6 +960,7 @@ class NekoWebPlugin(MaiBotPlugin):
 
     @Tool(
         'neko_web_text',
+        trusted_context='neko.tools.context.v1',
         description='续读已留存正文，或查找其中的字面关键词；不重新联网。',
         timeout_ms=5000,
         parameters=[
@@ -952,6 +975,7 @@ class NekoWebPlugin(MaiBotPlugin):
         ],
     )
     @tracked
+    @scoped
     async def handle_text(self, text_id='', offset=0, keyword='', limit=4000, **kwargs):
         disabled = self._check_enabled()
         if disabled:
@@ -970,15 +994,17 @@ class NekoWebPlugin(MaiBotPlugin):
             return {'success': False, 'status': 'invalid_request', 'content': 'offset超出本次留存范围，未联网。'}
         return text_result(document, text_id, offset=offset, limit=limit, keyword=keyword)
 
-    @Tool('neko_web_send_image', description='发送本聊天预览中选中的高清原文件，不发送压缩预览。', timeout_ms=75000,
+    @Tool('neko_web_send_image', description='用本聊天选中图片的原始字节发送；平台可能转换，不发送压缩预览。', timeout_ms=75000,
+          trusted_context='neko.tools.context.v1',
           parameters=[ToolParameterInfo(name='image_id', param_type=ToolParamType.STRING,
                                         description='预览结果中的image_id，原样传入', required=True)])
     @tracked
+    @scoped
     async def handle_send_image(self, image_id='', **kwargs):
         disabled = self._check_enabled()
         if disabled:
             return {'success': False, 'status': 'disabled', 'content': disabled}
-        scope = str(kwargs.get('stream_id') or kwargs.get('session_id') or kwargs.get('chat_id') or '').strip()
+        scope = self._text_scope(kwargs)
         if not scope or not isinstance(image_id, str) or not image_id or len(image_id) > 128:
             return {'success': False, 'status': 'invalid_request', 'content': '缺少当前聊天或图片编号。'}
         try:
@@ -1009,10 +1035,10 @@ class NekoWebPlugin(MaiBotPlugin):
                 sent = await self.ctx.send.image(base64.b64encode(image.data).decode('ascii'), scope,
                                                  set_reply=False, sync_to_maisaka_history=True,
                                                  maisaka_source_kind='neko_web_original')
-                if not sent:
+                if sent is not True:
                     return {'success': False, 'status': 'delivery_unconfirmed', 'content': f'已尝试发送，但平台未确认，不能宣称投递成功，不自动重复发送。原图链接：{original.url}'}
                 original.state = 'sent'
-                return {'success': True, 'status': 'sent', 'content': f'平台已确认图片发送请求：{image.width}×{image.height}，{len(image.data)}字节，使用下载到的原始字节，未重新编码。QQ可能压缩，最终原画质需客户端确认。来源：{original.url}'}
+                return {'success': True, 'status': 'sent', 'content': f'平台已确认图片发送请求：{image.width}×{image.height}，{len(image.data)}字节。插件向宿主提交下载到的原始字节，插件未重新编码；适配器或平台仍可能转换或压缩（包括QQ/TG），不代表用户收到原始文件，最终格式和画质需客户端确认。来源：{original.url}'}
         except asyncio.CancelledError:
             original.state = 'unknown' if send_started else 'ready'
             raise
@@ -1027,6 +1053,7 @@ class NekoWebPlugin(MaiBotPlugin):
 
     @Tool(
         "neko_web_read",
+        trusted_context="neko.tools.context.v1",
         description="读取网页或提取长文；默认只读文字，可显式预览配图。",
         timeout_ms=75000,
         parameters=[
@@ -1043,6 +1070,7 @@ class NekoWebPlugin(MaiBotPlugin):
                               description='仅page模式：true预览配图；默认false只读文字', required=False),
         ],
     )
+    @scoped
     async def handle_read_tool(self, url='', mode='page', include_images=False, **kwargs):
         if mode not in ('page', 'article') or type(include_images) is not bool:
             return {'success': False, 'status': 'invalid_request', 'content': 'mode须为page或article，include_images须为布尔值。'}
@@ -1054,6 +1082,7 @@ class NekoWebPlugin(MaiBotPlugin):
         return await self.handle_read(url, include_images=include_images, **kwargs)
 
     @tracked
+    @scoped
     async def handle_read(self, url: str = "", *, include_images=True, **kwargs: Any) -> str | dict[str, Any]:
         """打开公开链接，返回正文和候选图片。"""
 
