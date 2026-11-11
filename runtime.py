@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from functools import wraps
 
 
+FOLLOWUP_SCOPE_HINT = '若当前工具Schema要求session_id，沿用本次真实目标会话；不得编造会话或填写_host_context。'
+
+
 def response_status(text):
     first_line = text.split('\n', 1)[0]
     match = re.match(r'^(?:Exa 搜索|Jina SERP \((?:google|bing)\) 搜索|Firecrawl 原文|Jina 原文|AnySearch |搜索|原文)?状态：([a-z_]+)', first_line)
@@ -39,7 +42,7 @@ def scoped(function):
             return {'success': False, 'status': 'disabled', 'content': disabled}
         if not self._text_scope(kwargs):
             return {'success': False, 'status': 'invalid_context',
-                    'content': '可信宿主会话身份缺失或矛盾，未读取缓存、联网或发送。'}
+                    'content': '可信宿主会话身份缺失或矛盾，未读取缓存、联网或发送。请管理员核查会话路由；不要自填身份或_host_context。'}
         return await function(self, *args, **kwargs)
     return call
 

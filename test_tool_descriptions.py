@@ -30,3 +30,7 @@ class ToolDescriptionTests(TestCase):
     def test_domains_not_required_for_ordinary_search(self):
         description = ast.literal_eval(self.tools['neko_web_domains']['description'])
         self.assertIn('普通网页搜索不需要', description)
+
+    def test_main_purposes_use_model_visible_natural_keywords(self):
+        self.assertIn('联网搜索', ast.literal_eval(self.tools['neko_web_search']['description']))
+        self.assertIn('发送原图', ast.literal_eval(self.tools['neko_web_send_image']['description']))

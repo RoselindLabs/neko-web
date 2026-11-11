@@ -1,5 +1,6 @@
 """Merged model tools, real SDK discovery and synthetic provider/download work."""
 import asyncio
+import json
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -31,6 +32,13 @@ class UnifiedToolsTests(IsolatedAsyncioTestCase):
                          {'url', 'mode', 'include_images'})
         self.assertEqual({p['name'] for p in tools['neko_web_images']['parameters']}, {'urls', 'cursor'})
         self.assertFalse(self.p.config.automation.enabled)
+        param = search['sub_domain_params']
+        self.assertEqual(param['param_type'], 'string')
+        self.assertIn('JSON编码字符串', param['description'])
+        example = param['description'].split('调用示例：', 1)[1].split('；', 1)[0]
+        encoded = json.loads(example)['sub_domain_params']
+        self.assertIsInstance(encoded, str)
+        self.assertEqual(self.p._parse_params(encoded), ({'ticker': 'AAPL'}, None))
 
     async def test_one_or_many_searches_preserve_filters_dedup_and_explicit_extraction(self):
         result = await self.p.handle_search_tool(['one', ' one '], sites=['example.com'],
@@ -71,8 +79,10 @@ class UnifiedToolsTests(IsolatedAsyncioTestCase):
         self.assertEqual(result['content_items'], [])
         self.assertTrue(result['text_has_more'])
         self.assertFalse(result['has_more'])
+        self.assertIn('若当前工具Schema要求session_id', result['content'])
         more = await self.p.handle_text(result['text_id'], offset=result['next_offset'], _host_context=host_context())
         self.assertEqual(more['start'], 8000)
+        self.assertIn('沿用本次真实目标会话', more['content'])
         self.assertFalse((await self.p.handle_text(result['text_id'], _host_context=host_context('other')))['success'])
         self.p.ctx.send.image.assert_not_called()
 

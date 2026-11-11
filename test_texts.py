@@ -28,6 +28,7 @@ class RegistryTests(TestCase):
             offset = result['next_offset']
         self.assertEqual(''.join(chunks), doc.text)
         self.assertIn('不代表网站全文', result['content'])
+        self.assertIn('沿用本次真实目标会话', result['content'])
 
     def test_scope_missing_and_invalid_tokens_are_indistinguishable(self):
         store = TextRegistry()

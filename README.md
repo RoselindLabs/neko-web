@@ -1,6 +1,8 @@
 # Neko Web
 
-当前版本：1.11.3。
+当前版本：1.11.4。
+
+1.11.4：原图发送结果正文区分阶段：下载/校验前置失败明确本次未调用发送；已调用发送而超时、异常或未获确认则为unknown，可能已到达，不能宣称失败，也不能重新预览换ID补发。原状态与防重保持。工具描述直接说明“联网搜索”“发送原图”；正文续读、图片翻页及配图指引提醒按当前Schema沿用本次真实目标session_id，不编造会话或填写_host_context。子领域参数仍是JSON编码字符串。
 
 1.11.2：图片直链明确返回`image_url`及预览入口，不再套用空正文成功模板；正文保来源、抓取范围和续读参数，精简重复说明，配图模式不重复标题/来源。Exa/Jina批量搜索中完全相同的来源与摘录仅展示一次，其余查询引用已展示条目；不同摘录仍保留，不跨调用缓存或吞掉新证据。批次统一说明摘录/日期边界。供应商、额度、工具权限和发送行为保持。
 
@@ -32,6 +34,10 @@ Firecrawl提取会把目标URL交给第三方。发送前验证URL及DNS为公�
 - `neko_web_read(url, mode="page", include_images=false)`默认只从公开链接读标题/正文，留存供text续读，不创建图片队列、不下载或解码候选图；图片直链会提示用预览工具，不把图片当正文。`include_images=true`才沿用原配图预览流程，不直接发送。
 - `neko_web_read(url, mode="article")`显式走已配置AnySearch/Firecrawl/Jina长文服务，可能计费，不执行本地失败后自动升级/重试或换源。article只取正文，不能同时设include_images=true；返回的配图链接可另用images。
 - `neko_web_images(urls=["https://..."])`首次预览，`neko_web_images(cursor="上次next_cursor")`继续；二选一，不能同时传。原聊天隔离、一次游标、10分钟时效、图片预算与仅预览语义保持。
+
+若当前工具Schema要求`session_id`（如共享Focus），上述调用及`text/send_image`须沿用本次真实目标会话；不能编造身份或填写`_host_context`。缺可信会话时请管理员核查路由。article配图另用`neko_web_images(urls=[图片链接])`，或`neko_web_read(url=原网页链接, mode="page", include_images=true)`；默认read不会预览图片。
+
+专用领域的`sub_domain_params`类型保持string，传入JSON编码字符串；完整参数片段示例：`{"sub_domain_params":"{\"ticker\":\"AAPL\"}"}`，不要直接传object。
 
 旧`neko_web_batch_search/neko_web_extract/neko_web_images_next`不再注册给模型；底层旧处理方法仅保内部调用兼容，不是另外三份对外工具。下方旧版本小节的旧工具名属于历史，当前调用以本节及工具表为准。模型发现描述保持短小，正文/图片下一步参数由实际结果按需提示，不新增常驻提示或修改人设。
 

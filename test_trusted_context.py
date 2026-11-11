@@ -65,6 +65,7 @@ class TrustedContextTests(IsolatedAsyncioTestCase):
                         result = await call(**args, **kwargs)
                         self.assertFalse(result['success'])
                         self.assertEqual(result['status'], 'invalid_context')
+                        self.assertIn('管理员核查会话路由', result['content'])
             for mock in (search, public, api, get, claim, extract, self.p.ctx.send.image):
                 mock.assert_not_called()
 
@@ -154,6 +155,25 @@ class TrustedContextTests(IsolatedAsyncioTestCase):
                 self.assertFalse(result['success'])
                 self.assertEqual(result['status'], 'delivery_unconfirmed')
                 self.assertEqual(state, 'unknown')
+                self.assertIn('可能已到达用户', result['content'])
+                self.assertIn('不要重试', result['content'])
+                self.assertNotIn('原图处理失败', result['content'])
+
+    async def test_pre_send_errors_never_call_send_and_keep_ready(self):
+        for error, status in ((TimeoutError(), 'original_unavailable'),
+                              (plugin.ImageFetchError('bad image'), 'original_unavailable'),
+                              (RuntimeError('private detail'), 'internal_error')):
+            with self.subTest(error=error):
+                token = self.p._originals.add('chat', self.image)
+                with patch.object(plugin, 'load_image', AsyncMock(side_effect=error)) as load:
+                    result = await self.p.handle_send_image(token, _host_context=host_context())
+                self.assertEqual(result['status'], status)
+                self.assertIn('本次未调用发送', result['content'])
+                self.assertNotIn('unknown', result['content'])
+                self.assertNotIn('private detail', result['content'])
+                self.assertEqual(self.p._originals.items[token].state, 'ready')
+                load.assert_awaited_once()
+        self.p.ctx.send.image.assert_not_called()
 
     async def test_real_sdk_success_copy_distinguishes_original_submission_from_delivery(self):
         for platform in ('qq', 'telegram'):
