@@ -64,7 +64,7 @@ async def verify(host, report):
                 assert answer.error is None,answer.error
                 value=answer.payload['result']
                 assert value['success'] and value['cache_hit']==bool(index),value
-                assert 'CC BY 4.0' in value['content'] and '非IP定位' in value['content']
+                assert 'CC BY 4.0' in value['content'] and '管理员配置' in value['content']
             fetch.assert_awaited_once()
             result={'real_host_runner_sdk_weather_tool':True,'synthetic_source':True,
                 'source_and_valid_time_present':True,'cache_reused':True,

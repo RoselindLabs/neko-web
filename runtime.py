@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import wraps
 
 
-FOLLOWUP_SCOPE_HINT = '若当前工具Schema要求session_id，沿用本次真实目标会话；不得编造会话或填写_host_context。'
+FOLLOWUP_SCOPE_HINT = '后续调用若需session_id，沿用本次真实目标会话，勿编造或填写_host_context。'
 
 
 def response_status(text):

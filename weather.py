@@ -94,7 +94,7 @@ def parse_weather(payload, lat, lon, now):
     for group, fields in [('current', CURRENT), ('daily', DAILY)]:
         units = payload.get(group + '_units')
         if not isinstance(units, dict) or any(units.get(key) != UNITS[key] for key in fields):
-            raise WeatherError('invalid_response', '天气响应单位不匹配，未猜测换算。')
+            raise WeatherError('invalid_response', '天气响应单位不匹配。')
     valid_at = local_time(current.get('time'))
     if not -600 <= (now - valid_at).total_seconds() <= 7200:
         raise WeatherError('stale', '天气源当前数据过旧或时间异常，未当作实时天气。')
@@ -129,9 +129,9 @@ async def fetch_weather(lat, lon, client_options):
                 if response.status_code == 429:
                     retry = response.headers.get('retry-after', '')
                     cooldown = max(60, min(int(retry), 86400)) if retry.isdecimal() and len(retry) <= 6 else 120
-                    raise WeatherError('rate_limited', '天气源限流，未自动重试或换源。', cooldown)
+                    raise WeatherError('rate_limited', '天气源限流。', cooldown)
                 if response.status_code != 200:
-                    raise WeatherError('unavailable', '天气源请求未成功，未跟随跳转或换源。')
+                    raise WeatherError('unavailable', '天气源请求未成功。')
                 raw = bytearray()
                 async for chunk in response.aiter_bytes():
                     if len(raw) + len(chunk) > MAX_BYTES:
@@ -142,9 +142,9 @@ async def fetch_weather(lat, lon, client_options):
         except (ValueError, UnicodeError):
             raise WeatherError('invalid_response', '天气源响应格式无效。') from None
     except httpx.TimeoutException:
-        raise WeatherError('timeout', '天气查询超时，未自动重试。') from None
+        raise WeatherError('timeout', '天气查询超时。') from None
     except httpx.HTTPError:
-        raise WeatherError('unavailable', '天气源连接失败，未自动重试或换源。') from None
+        raise WeatherError('unavailable', '天气源连接失败。') from None
 
 
 def render_weather(data, name, day, fetched_at, hit):
@@ -153,9 +153,10 @@ def render_weather(data, name, day, fetched_at, hit):
     def condition(code):
         return CODES.get(code, '未知')
     current, daily = data['current'], data['daily'][day]
-    lines = [f'[天气资料] 地点：{name}（管理员配置，非IP定位；时间均为北京时间）',
-             f'查询时间：{fetched_at}；当前数据有效时间：{data["current_time"]}',
-             f'缓存：{"命中，复用原查询" if hit else "本次查询"}（成功缓存最多5分钟，不自动刷新）']
+    lines = [f'[天气资料] 地点：{name}（管理员配置；时间均为北京时间）',
+             f'查询时间：{fetched_at}；当前数据有效时间：{data["current_time"]}']
+    if hit:
+        lines.append('缓存命中，复用原查询（最多5分钟）。')
     if day == 0:
         lines += [f'当前模型天气：{condition(current["weather_code"])}；气温{show(current["temperature_2m"], "℃")}；'
                   f'体感{show(current["apparent_temperature"], "℃")}；湿度{show(current["relative_humidity_2m"], "%")}；'
@@ -164,9 +165,8 @@ def render_weather(data, name, day, fetched_at, hit):
               f'最低{show(daily["temperature_2m_min"], "℃")}／最高{show(daily["temperature_2m_max"], "℃")}；'
               f'降水概率最大值{show(daily["precipitation_probability_max"], "%")}；'
               f'全天累计降水量{show(daily["precipitation_sum"], "mm")}。',
-              '日预报不是此刻实况，降水概率不表示必然下雨；不是分钟级降雨、气象预警或空气质量数据。',
-              f'来源：Open-Meteo {SOURCE} · CC BY 4.0；当前值也是天气模型数据，并非本地气象站实测或亲历。',
-              '只按需回答，不据此主动播报、推断用户位置或编造自己出门/淋雨等经历；来源与数据时间应保留。']
+              '日预报不是此刻实况，降水概率不表示必然下雨。',
+              f'来源：Open-Meteo {SOURCE} · CC BY 4.0；天气模型数据，非气象站实测。']
     return '\n'.join(lines)
 
 

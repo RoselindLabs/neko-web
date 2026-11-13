@@ -59,7 +59,7 @@ class PreviewTests(IsolatedAsyncioTestCase):
         self.assertIn('neko_web_images(cursor="next-token")', result['content'])
         self.assertIn('沿用本次真实目标会话', result['content'])
         empty = self.plugin._batch_preview_result(([], [], 'next-token', 5, False), 'test')
-        self.assertIn('若当前工具Schema要求session_id', empty['content'])
+        self.assertIn('后续调用若需session_id', empty['content'])
         result = self.plugin._batch_preview_result(([self.image], [], '', 0, False), 'test')
         self.assertNotIn('neko_web_images_next', result['content'])
 

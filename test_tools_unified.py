@@ -79,10 +79,10 @@ class UnifiedToolsTests(IsolatedAsyncioTestCase):
         self.assertEqual(result['content_items'], [])
         self.assertTrue(result['text_has_more'])
         self.assertFalse(result['has_more'])
-        self.assertIn('若当前工具Schema要求session_id', result['content'])
+        self.assertIn('后续调用若需session_id', result['content'])
         more = await self.p.handle_text(result['text_id'], offset=result['next_offset'], _host_context=host_context())
         self.assertEqual(more['start'], 8000)
-        self.assertIn('沿用本次真实目标会话', more['content'])
+        self.assertNotIn('沿用本次真实目标会话', more['content'])
         self.assertFalse((await self.p.handle_text(result['text_id'], _host_context=host_context('other')))['success'])
         self.p.ctx.send.image.assert_not_called()
 

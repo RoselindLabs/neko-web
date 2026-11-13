@@ -171,7 +171,7 @@ class RoutingTests(IsolatedAsyncioTestCase):
                 patch('retrieval.extract_jina_document', AsyncMock(return_value=self.doc)) as jina, \
                 patch('retrieval.extract_firecrawl', AsyncMock()) as fire:
             result = await retrieve(None, config, 'query', 3, {}, read_pages=1, render_document=render)
-            self.assertIn('正文编号', result)
+            self.assertIn('text_id=', result)
             self.assertIn('提取来源：jina', result)
             self.assertLessEqual(len(result), 16000)
             await retrieve(None, config, 'query', 3, {})
