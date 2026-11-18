@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.request
 
 PRODUCTION_PYTHON = "3.14.4"
-PRODUCTION_SDK = "==2.16.0"
+PRODUCTION_SDK = "==2.23.0"
 
 
 def is_documentation(name):
@@ -131,7 +131,7 @@ def plugin_matrix(plugin, full=False):
     minimum = "==2.10.0" if plugin in {"neko-tts", "neko-server-status"} else "==2.12.0"
     oldest = "3.10" if plugin == "neko-server-status" else "3.12"
     production = {
-        "os": "ubuntu-latest",
+        "os": "ubuntu-24.04",
         "python": PRODUCTION_PYTHON,
         "sdk": "production",
         "sdk_spec": PRODUCTION_SDK,
