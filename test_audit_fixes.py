@@ -230,7 +230,8 @@ class AuditAsyncTests(IsolatedAsyncioTestCase):
         load.assert_not_called()
 
     async def test_batch_errors_have_unsuccessful_tool_status(self):
-        self.p._provider_search = AsyncMock(return_value='Exa 搜索状态：auth_error；密钥错误。')
-        result = await self.p.handle_batch_search(['query'], _host_context=host_context())
+        self.p.config.web.search_provider = 'exa'
+        with patch.object(plugin, 'search_sources', side_effect=plugin.ProviderError('HTTP 401')):
+            result = await self.p.handle_batch_search(['query'], _host_context=host_context())
         self.assertFalse(result['success'])
         self.assertEqual(result['status'], 'auth_error')

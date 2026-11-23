@@ -47,9 +47,10 @@ class UnifiedToolsTests(IsolatedAsyncioTestCase):
         self.assertEqual(self.p._provider_search.call_args.args, ('one', 5, {'includeDomains': ['example.com']}, 2))
         self.assertEqual(self.p._provider_search.call_args.kwargs['scope'], 'chat')
         self.p._provider_search.reset_mock()
-        result = await self.p.handle_search_tool(['one', 'two', 'one'], _host_context=host_context())
+        with patch.object(plugin, 'search_sources', AsyncMock(return_value=([], {}))) as fetch:
+            result = await self.p.handle_search_tool(['one', 'two', 'one'], _host_context=host_context())
         self.assertTrue(result['success'])
-        self.assertEqual(self.p._provider_search.await_count, 2)
+        self.assertEqual([call.args[2] for call in fetch.await_args_list], ['one', 'two'])
         self.assertIn('查询：two', result['content'])
         self.p._call_api.assert_not_called()
 

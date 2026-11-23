@@ -1,6 +1,6 @@
 from unittest import IsolatedAsyncioTestCase
-from unittest.mock import AsyncMock
-from test_support import TestPlugin, host_context
+from unittest.mock import AsyncMock, patch
+from test_support import TestPlugin, host_context, plugin
 
 
 class RoutingTests(IsolatedAsyncioTestCase):
@@ -34,8 +34,12 @@ class RoutingTests(IsolatedAsyncioTestCase):
         self.p._provider_search.assert_not_called()
 
     async def test_duplicate_queries_only_search_once(self):
-        text = await self.p.handle_batch_search(['one', ' one ', 'two'], _host_context=host_context())
-        self.assertEqual(self.p._provider_search.await_count, 2)
+        with patch.object(plugin, 'search_sources', AsyncMock(return_value=([], {}))) as fetch, \
+                patch.object(plugin, 'render_search_preview', wraps=plugin.render_search_preview) as render:
+            text = await self.p.handle_batch_search(['one', ' one ', 'two'], _host_context=host_context('real-scope'))
+        self.assertEqual([call.args[2] for call in fetch.await_args_list], ['one', 'two'])
+        render.assert_called_once()
+        self.assertEqual(render.call_args.kwargs, dict(scope='real-scope', label='Exa', registry=self.p._texts))
         self.assertIn('查询：two', text['content'])
 
     async def test_anysearch_does_not_silently_ignore_batch_filters(self):

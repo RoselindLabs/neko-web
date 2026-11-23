@@ -30,6 +30,8 @@ required = {
     "test_automation_api",
     "test_audit_fixes",
     "test_search_routing",
+    "test_search_preview",
+    "test_search_workflow",
     "test_release",
     "test_images",
     "test_weather",

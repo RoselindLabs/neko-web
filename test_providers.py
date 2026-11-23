@@ -30,6 +30,19 @@ class ProviderTests(IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ProviderError, '响应过大'):
                 await search_exa_results(client, 'test', 'query', 1)
 
+    async def test_bad_optional_exa_telemetry_is_absent_without_losing_results(self):
+        for value, queue in [(None, ''), ('123-key', '2\tsecret'), (False, '-1'), ({'private': 1}, '1e3'),
+                             (float('inf'), '9' * 200), (-5, '1, 2'), (10 ** 60, 'NaN')]:
+            # The JSON decoder can receive an overflowing float (1e999) from the wire.
+            wire = json.dumps({'searchTime': value, 'results': [{'title': 'evidence'}]}).replace('Infinity', '1e999')
+            def reply(req):
+                return httpx.Response(200, content=wire, headers={'x-exa-queue-ms': queue})
+            timing = {}
+            async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as client:
+                found = await search_exa_results(client, 'test', 'query', 1, timing=timing)
+            self.assertEqual(found, [{'title': 'evidence'}])
+            self.assertEqual(timing, {})
+
     async def test_search_request_and_bounded_sources(self):
         def handler(req):
             self.assertEqual(req.headers['x-api-key'], 'test')

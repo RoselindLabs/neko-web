@@ -33,10 +33,14 @@ class ProviderError(ValueError):
         self.code = code
 
 
-async def post_json(client, endpoint, headers, body):
+async def post_json(client, endpoint, headers, body, *, exa_timing=None):
     try:
         async with client.stream('POST', endpoint, headers=headers, json=body,
                                  follow_redirects=False) as response:
+            if exa_timing is not None:
+                queue = response.headers.get('x-exa-queue-ms', '')
+                if re.fullmatch(r'[0-9]{1,8}(?:\.[0-9]{1,9})?', queue):
+                    exa_timing['exa_queue_ms'] = int(queue.partition('.')[0])
             if response.status_code != 200:
                 raise ProviderError(f'HTTP {response.status_code}')
             raw = bytearray()
@@ -58,13 +62,16 @@ async def post_json(client, endpoint, headers, body):
         raise ProviderError('响应格式无效') from None
 
 
-async def search_exa_results(client, key, query, count, filters=None):
+async def search_exa_results(client, key, query, count, filters=None, *, timing=None):
     if not key.strip():
         raise ProviderError('未配置 Exa 密钥')
     body = {'query': query, 'type': 'auto', 'numResults': count,
             'contents': {'highlights': {'maxCharacters': 1000}}}
     body.update(filters or {})
-    data = await post_json(client, 'https://api.exa.ai/search', {'x-api-key': key}, body)
+    data = await post_json(client, 'https://api.exa.ai/search', {'x-api-key': key}, body, exa_timing=timing)
+    search_ms = data.get('searchTime')
+    if timing is not None and type(search_ms) in (int, float) and 0 <= search_ms < 100_000_000:
+        timing['exa_search_ms'] = int(search_ms)
     results = data.get('results')
     if not isinstance(results, list):
         raise ProviderError('搜索结果格式无效')
