@@ -1,6 +1,14 @@
 # Neko Web
 
-当前版本：1.12.0。
+当前版本：1.13.0。
+
+### 用 Linkup 快答
+
+在 WebUI 的联网配置里填入自己的 **Linkup API Key**，再将「手动搜索来源覆盖」选为 `linkup_fast`。只填 Key 不会启用。麦麦照常用 `neko_web_search(queries=["问题"])`，不需要选择供应商或学习新参数。要切回原来的搜索来源，改回 `configured` 即可。
+
+一次普通查询使用 Linkup `fast + sourcedAnswer`，按题同时给出**供应商候选答案及来源摘录**。先判断摘录能否支持答案；这不是麦麦已核验网页全文。批量按去重后的子问题分别请求（最多 5 题、2 并发），不重试、不再并发查 Exa。`sites` 和支持的日期范围会传给 Linkup；`read_pages` 保持 0，需要原文时另用 `neko_web_read`。专用领域继续使用 AnySearch，后台检索和正文提取仍用各自的原配置。见[搜索接口](https://docs.linkup.so/pages/documentation/endpoints/search/reference)及[当前费用](https://docs.linkup.so/pages/documentation/platform/pricing)。
+
+### 查看搜索证据
 
 普通 Exa / Jina 搜索先展示每个问题最多两条来源。比如一次查「新版改了什么」和「怎么升级」，两个问题都能看到标题、链接和摘录；同一份公告共用一个来源编号，不同问题命中的不同段落仍然保留。没展示完时，按结果里的 `text_id` 用 `neko_web_text` 展开或按关键词查找，最多留存 10 分钟，只限本聊天，不重新搜索。这份快照是**搜索结果及摘录**；要核对网页正文仍用 `neko_web_read`。
 
@@ -18,7 +26,7 @@
 
 给 [MaiBot](https://github.com/Mai-with-u/MaiBot) 用的联网插件。搜索公开网页，读取标题、正文和候选图片，由麦麦看图挑选后随回复发送。
 
-普通搜索使用配置的 Exa、Jina SERP 或 [AnySearch](https://anysearch.com)，专用领域走 AnySearch。打开公开链接和下载图片由插件自己完成。搜索客户端的早期实现来自 [gomico/maibot_plugin_anysearch](https://github.com/gomico/maibot_plugin_anysearch)，该项目以 MIT 许可证发布。
+普通搜索使用配置的 Linkup、Exa、Jina SERP 或 [AnySearch](https://anysearch.com)，专用领域走 AnySearch。打开公开链接和下载图片由插件自己完成。搜索客户端的早期实现来自 [gomico/maibot_plugin_anysearch](https://github.com/gomico/maibot_plugin_anysearch)，该项目以 MIT 许可证发布。
 
 1.3.0可在 `[web]` 设置 `search_provider="exa"`、`exa_api_key`，普通/批量搜索使用Exa auto＋有来源的摘录，专用领域继续AnySearch。设置 `extract_provider="firecrawl"`、`firecrawl_api_key` 后长文工具走Firecrawl v2 Markdown提取（含动态页），`read`和图片仍走原本公网下载器。默认仍为AnySearch；不自动跨供应商重试、不开deep/crawl/付费代理等额外能力。两家均按服务商额度计费，请自行设额度限制。
 

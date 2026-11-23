@@ -8,11 +8,11 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 try:
     from .public_http import validate_url
-    from .providers import ProviderError, extract_firecrawl, extract_firecrawl_document, extract_jina_document, search_exa_results, search_jina_results
+    from .providers import ProviderError, extract_firecrawl, extract_firecrawl_document, extract_jina_document, search_exa_results, search_jina_results, search_linkup_results
     from .runtime import Deadline, bounded_text, response_status
 except ImportError:
     from public_http import validate_url
-    from providers import ProviderError, extract_firecrawl, extract_firecrawl_document, extract_jina_document, search_exa_results, search_jina_results
+    from providers import ProviderError, extract_firecrawl, extract_firecrawl_document, extract_jina_document, search_exa_results, search_jina_results, search_linkup_results
     from runtime import Deadline, bounded_text, response_status
 
 MAX_SEARCH_CONCURRENCY = 2
@@ -116,19 +116,26 @@ def error_status(exc):
     return code, messages.get(code, messages['provider_error'])
 
 
-async def search_sources(client, config, query, count, filters, *, deadline=None, backend='exa', timing=None):
+async def search_sources(client, config, query, count, filters, *, deadline=None, backend='exa', timing=None, answers=None):
     """Fetch and normalize structured sources without formatting or reading pages."""
     deadline = deadline or Deadline.after(95)
     async with asyncio.timeout(min(config.timeout_seconds, 30, deadline.remaining(2))):
-        if backend == 'jina_serp':
+        if backend == 'linkup_fast':
+            results, answer = await search_linkup_results(client, config.linkup_api_key, query, count, filters)
+        elif backend == 'jina_serp':
             if filters:
                 raise ProviderError('Jina搜索不支持当前筛选', 'unsupported')
             results = await search_jina_results(client, config.jina_api_key, query, count, config.jina_search_engine)
-        else:
+        elif backend == 'exa':
             results = await search_exa_results(client, config.exa_api_key, query, count, filters, timing=timing)
+        else:
+            raise ProviderError('未知搜索来源', 'config_error')
     sources, stats = organize_results(results, count)
     if results and not sources:
         raise ProviderError('搜索条目全部无效', 'invalid_response')
+    if backend == 'linkup_fast' and answers is not None and answer:
+        # The renderer decides whether the retained evidence can accompany this query's answer.
+        answers[query] = answer
     return sources, stats
 
 

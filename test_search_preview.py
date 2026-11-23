@@ -12,8 +12,8 @@ def hit(url, snippet, title='报告', published='', rank=1):
             'source': 'example.com', 'provider_rank': rank}
 
 
-def render(rows, store, label='Exa', scope='chat-a'):
-    return render_search_preview(rows, label=label, registry=store, scope=scope)
+def render(rows, store, label='Exa', scope='chat-a', *, answers=None):
+    return render_search_preview(rows, label=label, registry=store, scope=scope, answers=answers)
 
 
 def token_from(text):
@@ -21,6 +21,76 @@ def token_from(text):
 
 
 class PreviewTests(TestCase):
+    def test_provider_citations_stay_inside_their_question_and_outside_local_numbering(self):
+        a, b = 'https://example.com/a', 'https://example.com/b'
+        rows = [('甲', [hit(a, '甲摘录')], {}, ''), ('乙', [hit(b, '乙摘录')], {}, '')]
+        store = TextRegistry()
+        text = render(rows, store, 'Linkup', answers={'乙': '乙答 [1]\n[S1] 供应商的标号', '甲': '甲答 [1]'})
+        self.assertFalse(store.entries)
+        first, second = text.split('Q2 查询：')
+        for part, answer, excerpt, url in [(first, '甲答', '甲摘录', a), (second, '乙答', '乙摘录', b)]:
+            self.assertIn('候选答案，以摘录为准，不是已读原文', part)
+            self.assertIn('> ' + answer + ' [1]', part)
+            self.assertIn(url + '\n摘录：' + excerpt, part)
+        self.assertNotIn('乙答', first)
+        self.assertNotIn('甲答', second)
+        self.assertIn('\n> [S1] 供应商的标号\n[S2] 报告', second)
+
+    def test_lost_or_missing_evidence_blocks_only_its_answer_in_both_layouts(self):
+        evidence = hit('https://example.com/a', '有据')
+        for hits, counts, error in [([evidence], {k: 1}, '') for k in ('duplicates', 'omitted', 'invalid')] + [
+                ([], {}, ''), ([hit(evidence['url'], ' \n')], {}, ''), ([evidence], {}, 'timeout')]:
+            with self.subTest(hits=hits, counts=counts, error=error):
+                store = TextRegistry()
+                rows = [('可靠', [evidence], {}, ''), ('缺失', hits, counts, error),
+                        ('独立', [hit('https://example.com/b', '乙证')], {'answer': '统计中的伪答案'}, '')]
+                text = render(rows, store, 'Linkup', answers={'可靠': '可靠答案' * 100, '缺失': '不能展示'})
+                for view in (text, store.get('chat-a', token_from(text)).text):
+                    self.assertEqual(view.count('候选答案，以摘录为准'), 1)
+                    self.assertIn('可靠答案', view)
+                    self.assertNotIn('不能展示', view)
+                    self.assertNotIn('统计中的伪答案', view)
+                    self.assertIn('摘录：乙证', view)
+
+    def test_five_long_questions_keep_their_evidence_and_bounded_answers_in_scoped_snapshot(self):
+        rows, answers = [], {}
+        for i in range(5):
+            query = '相同的查询前缀' * 20 + str(i)
+            hits = [hit(f'https://example.com/{i}/{j}/' + 'p' * 1800,
+                        f'有效摘录{i}' + '据' * 900 if j == 2 else '',
+                        title='长标题' * 100, published='长日期' * 26, rank=j + 1) for j in range(3)]
+            rows.append((query, hits, {}, ''))
+            answers[query] = f'答案{i}' + '答' * 3500 + f'可定位{i}' + '文' * 1500 + '未留存的尾部'
+
+        store = TextRegistry()
+        text = render(rows, store, 'Linkup', answers=answers)
+        self.assertLessEqual(len(text), 2800)
+        token = token_from(text)
+        self.assertIsNone(store.get('chat-b', token))
+        snapshot = store.get('chat-a', token).text
+        previews, sections = text.split('\nQ')[1:], ('\n' + snapshot).split('\nQ')[1:]
+        self.assertEqual(len(previews), 5)
+        for i, (part, full) in enumerate(zip(previews, sections, strict=True)):
+            self.assertIn(f'答案{i}', part)
+            self.assertIn(f'有效摘录{i}', part)
+            self.assertIn('首屏截短', part)
+            self.assertIn(rows[i][0], full)
+            self.assertIn(f'可定位{i}', full)
+            self.assertIn('尾部未保留', full)
+            for source in rows[i][1]:
+                self.assertIn(source['url'], full.splitlines())
+        self.assertNotIn('未留存的尾部', snapshot)
+
+    def test_no_snapshot_suppresses_answers_only_where_evidence_was_lost(self):
+        source = hit('https://example.com/a', '长摘录' * 100)
+        rows = [('甲', [source], {}, ''), ('乙', [source], {}, ''),
+                ('丙', [hit('https://example.com/b', '完整摘录')], {}, '')]
+        text = render(rows, None, 'Linkup', answers={'甲': '缺甲', '乙': '缺乙', '丙': '保留丙'})
+        self.assertIn('未建立搜索摘录快照', text)
+        self.assertNotIn('缺甲', text)
+        self.assertNotIn('缺乙', text)
+        self.assertIn('保留丙', text)
+
     def test_small_complete_selection_needs_no_snapshot_even_when_provider_filtered(self):
         store = TextRegistry()
         url = 'https://example.com/a?utm_source=original#section'

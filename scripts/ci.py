@@ -32,6 +32,8 @@ required = {
     "test_search_routing",
     "test_search_preview",
     "test_search_workflow",
+    "test_linkup_workflow",
+    "test_linkup_provider",
     "test_release",
     "test_images",
     "test_weather",

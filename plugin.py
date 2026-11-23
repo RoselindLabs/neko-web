@@ -35,7 +35,7 @@ from .weather import WeatherError, WeatherService
 
 
 ANYSEARCH_ENDPOINT = "https://api.anysearch.com/mcp"
-CLIENT_HEADER = "neko-web/1.12.0"
+CLIENT_HEADER = "neko-web/1.13.0"
 VERTICAL_DOMAINS = {
     "academic",
     "agriculture",
@@ -92,7 +92,7 @@ class WebConfig(PluginConfigBase):
     __ui_order__ = 1
 
     search_provider: Literal['anysearch', 'exa'] = Field(default='anysearch', description='普通搜索来源')
-    manual_search_provider: Literal['configured', 'jina_serp'] = Field(
+    manual_search_provider: Literal['configured', 'jina_serp', 'linkup_fast'] = Field(
         default='configured', description='仅普通/批量手动搜索覆盖；configured沿用搜索来源，Life后台不受影响',
         json_schema_extra={'label': '手动搜索来源覆盖'})
     jina_search_engine: Literal['google', 'bing'] = Field(default='google', description='Jina SERP搜索引擎，核对实际返回，不自动换源',
@@ -101,6 +101,9 @@ class WebConfig(PluginConfigBase):
                                 json_schema_extra={'label': 'Jina专用代理（可选）'})
     extract_provider: Literal['anysearch', 'firecrawl', 'jina'] = Field(default='anysearch', description='长文提取来源；显式选择，不自动换源')
     exa_api_key: str = Field(default='', description='Exa API Key，仅存服务器配置')
+    linkup_api_key: str = Field(default='', repr=False,
+                                description='仅 linkup_fast 使用；一次搜索返回候选答案和来源摘录。',
+                                json_schema_extra={'label': 'Linkup API Key', 'x-widget': 'password'})
     firecrawl_api_key: str = Field(default='', description='Firecrawl API Key，仅存服务器配置')
     jina_api_key: str = Field(default='', description='Jina Reader API Key，可留空匿名；仅选择jina时使用',
                               json_schema_extra={'label': 'Jina Reader 密钥（可选）'})
@@ -462,7 +465,7 @@ class NekoWebPlugin(MaiBotPlugin):
 
     @staticmethod
     def _manual_backend(config):
-        return 'jina_serp' if config.manual_search_provider == 'jina_serp' else config.search_provider
+        return config.search_provider if config.manual_search_provider == 'configured' else config.manual_search_provider
 
     def _search_client(self, config, *, jina):
         return httpx.AsyncClient(timeout=config.timeout_seconds, **self._build_client_options(config, jina=jina))
@@ -476,7 +479,9 @@ class NekoWebPlugin(MaiBotPlugin):
     async def _manual_results(self, queries, count, filters, *, config, backend, scope, deadline=None):
         """A single tool call owns the config, pool and (for structured results) preview scope."""
         started = monotonic_ns()
-        label = f'Jina SERP ({config.jina_search_engine})' if backend == 'jina_serp' else 'Exa'
+        label = ('Linkup' if backend == 'linkup_fast' else
+                 f'Jina SERP ({config.jina_search_engine})' if backend == 'jina_serp' else 'Exa')
+        answers = {} if backend == 'linkup_fast' else None
 
         def failure(query, code):
             return query, [], {'invalid': 0, 'omitted': 0, 'duplicates': 0}, 'timeout' if code == 'deadline' else code
@@ -499,13 +504,13 @@ class NekoWebPlugin(MaiBotPlugin):
 
                     async def structured(query, limit, timing):
                         sources, stats = await search_sources(client, config, query, limit, filters, deadline=deadline,
-                                                              backend=backend, timing=timing)
+                                                              backend=backend, timing=timing, answers=answers)
                         return query, sources, stats, ''
 
                     rows = await collect_queries(queries, count, structured, self._search_slots, timeout, failure,
                                                  total_timeout=deadline.remaining() if deadline else None,
                                                  observe=self._search_timing)
-            return render_search_preview(rows, label=label, registry=self._texts, scope=scope)
+            return render_search_preview(rows, label=label, registry=self._texts, scope=scope, answers=answers)
         finally:
             self._search_timing({'batch_ms': (monotonic_ns() - started) // 1_000_000})
 
@@ -593,13 +598,13 @@ class NekoWebPlugin(MaiBotPlugin):
                 required=False,
             ),
             ToolParameterInfo(name="sites", param_type=ToolParamType.ARRAY,
-                              items_schema={"type": "string"}, description="Exa限定网站，最多5个域名；可留空", required=False),
+                               items_schema={"type": "string"}, description="Exa/Linkup 限定网站，最多5个域名；可留空", required=False),
             ToolParameterInfo(name="published_after", param_type=ToolParamType.STRING,
-                              description="Exa发布日期下限 YYYY-MM-DD；可留空", required=False),
+                               description="Exa/Linkup 发布日期下限 YYYY-MM-DD；可留空", required=False),
             ToolParameterInfo(name="published_before", param_type=ToolParamType.STRING,
-                              description="Exa发布日期上限 YYYY-MM-DD；可留空", required=False),
+                               description="Exa/Linkup 发布日期上限 YYYY-MM-DD；可留空", required=False),
             ToolParameterInfo(name="read_pages", param_type=ToolParamType.INTEGER,
-                               description="仅单问题可额外读前0–2篇原文，默认0；消耗已配置提取服务额度", required=False),
+                                description="Exa/Jina 单问题可额外读前0–2篇原文，默认0；Linkup 快答留0", required=False),
             ToolParameterInfo(
                 name="domain",
                 param_type=ToolParamType.STRING,
@@ -705,8 +710,10 @@ class NekoWebPlugin(MaiBotPlugin):
             return vertical_error
         if 'domain' not in arguments:
             backend = self._manual_backend(config)
-            if filters and backend != 'exa':
-                return '搜索状态：unsupported；网站/日期筛选需使用Exa，未发起请求。'
+            if filters and backend not in {'exa', 'linkup_fast'}:
+                return '搜索状态：unsupported；此搜索来源不支持网站/日期筛选，未发起请求。'
+            if backend == 'linkup_fast' and read_pages:
+                return '搜索状态：unsupported；Linkup 快答只取答案和来源摘录。请省略 read_pages，需要正文时再用 neko_web_read。未发起请求。'
             if not read_pages and backend != 'anysearch':
                 return await self._manual_results([query], result_count, filters, config=config, backend=backend,
                                                   scope=scope, deadline=deadline)
@@ -806,8 +813,8 @@ class NekoWebPlugin(MaiBotPlugin):
             return "AnySearch 批量搜索失败：max_results 必须是 1 到 10 之间的整数。"
 
         backend = self._manual_backend(config)
-        if filters and backend != 'exa':
-            return '搜索状态：unsupported；网站/日期筛选需使用Exa，未发起请求。'
+        if filters and backend not in {'exa', 'linkup_fast'}:
+            return '搜索状态：unsupported；此搜索来源不支持网站/日期筛选，未发起请求。'
         return await self._manual_results(normalized_queries, result_count, filters, config=config, backend=backend,
                                           scope=self._text_scope(kwargs))
 

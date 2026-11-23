@@ -39,7 +39,7 @@ class RoutingTests(IsolatedAsyncioTestCase):
             text = await self.p.handle_batch_search(['one', ' one ', 'two'], _host_context=host_context('real-scope'))
         self.assertEqual([call.args[2] for call in fetch.await_args_list], ['one', 'two'])
         render.assert_called_once()
-        self.assertEqual(render.call_args.kwargs, dict(scope='real-scope', label='Exa', registry=self.p._texts))
+        self.assertEqual(render.call_args.kwargs, dict(scope='real-scope', label='Exa', registry=self.p._texts, answers=None))
         self.assertIn('查询：two', text['content'])
 
     async def test_anysearch_does_not_silently_ignore_batch_filters(self):

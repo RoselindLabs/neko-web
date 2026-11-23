@@ -2,6 +2,7 @@
 import asyncio
 import json
 import re
+from datetime import date
 from urllib.parse import urlparse
 
 import httpx
@@ -76,6 +77,82 @@ async def search_exa_results(client, key, query, count, filters=None, *, timing=
     if not isinstance(results, list):
         raise ProviderError('搜索结果格式无效')
     return results
+
+
+def _linkup_date(value):
+    if not isinstance(value, str) or len(value) != 10:
+        return False
+    try:
+        return date.fromisoformat(value).isoformat() == value
+    except ValueError:
+        return False
+
+
+def _linkup_filters(filters):
+    """Translate search_filters' UTC day boundaries without widening them."""
+    if filters.keys() - {'includeDomains', 'startPublishedDate', 'endPublishedDate'}:
+        raise ProviderError('Linkup 不支持当前筛选', 'unsupported')
+    result = {'includeDomains': filters['includeDomains']} if 'includeDomains' in filters else {}
+    for field, target, suffix in [('startPublishedDate', 'fromDate', 'T00:00:00Z'),
+                                  ('endPublishedDate', 'toDate', 'T23:59:59Z')]:
+        if field in filters:
+            value = filters[field]
+            if not isinstance(value, str) or not value.endswith(suffix):
+                raise ProviderError('Linkup 只支持整日日期筛选', 'unsupported')
+            day = value.removesuffix(suffix)
+            if not _linkup_date(day) or day <= '1970-01-01':
+                raise ProviderError('Linkup 筛选日期须晚于 1970-01-01', 'unsupported')
+            result[target] = day
+    if 'fromDate' in result and 'toDate' in result and result['fromDate'] >= result['toDate']:
+        raise ProviderError('Linkup 起始日期必须早于结束日期，不支持单日范围', 'unsupported')
+    return result
+
+
+def _linkup_source(item, key, filters):
+    if not isinstance(item, dict):
+        return None
+    for field in ('name', 'url', 'snippet'):
+        value = item.get(field)
+        if not isinstance(value, str) or not value.strip() or key in value:
+            return None
+    url = item['url'].strip()
+    if validate_url(url) or '\\' in url:
+        return None
+    domains = filters.get('includeDomains')
+    if domains:
+        host = httpx.URL(url).raw_host.decode('ascii').removesuffix('.')
+        if '%' in host or not any(host == domain or host.endswith('.' + domain) for domain in domains):
+            return None
+    published = item.get('publishedAt', '')
+    if 'publishedAt' in item and (not _linkup_date(published) or key in published
+            or ('fromDate' in filters and published < filters['fromDate'])
+            or ('toDate' in filters and published > filters['toDate'])):
+        return None
+    return {'url': url, 'title': item['name'].strip()[:300], 'publishedDate': published,
+            'highlights': [item['snippet'].strip()[:1000]]}
+
+
+async def search_linkup_results(client, key, query, count, filters=None):
+    """Return Exa-shaped records and only the answer backed by the accepted source set."""
+    key = key.strip()
+    if not key or not key.isascii() or not key.isprintable() or ' ' in key:
+        raise ProviderError('Linkup 密钥缺失或格式无效', 'config_error')
+    if type(count) is not int or not 1 <= count <= 10:
+        raise ProviderError('搜索数量无效', 'invalid_request')
+    filters = _linkup_filters(filters or {})
+    data = await post_json(client, 'https://api.linkup.so/v1/search', {'Authorization': 'Bearer ' + key},
+                           {'q': query, 'depth': 'fast', 'outputType': 'sourcedAnswer', 'maxResults': count,
+                            'includeInlineCitations': False, **filters})
+    answer, sources = data.get('answer'), data.get('sources')
+    if (data.get('error') or not isinstance(answer, str) or not isinstance(sources, list)
+            or len(sources) > count):
+        raise ProviderError('搜索结果格式无效')
+    records = [_linkup_source(item, key, filters) for item in sources]
+    if records and not any(records):
+        raise ProviderError('Linkup 返回的来源全部无效', 'invalid_response')
+    # The answer is indivisible: even one rejected source may have contributed to it.
+    # Keep None markers for organize_results' invalid count, never the rejected source text.
+    return records, answer.strip() if records and all(records) and key not in answer else ''
 
 
 async def search_jina_results(client, key, query, count, engine):

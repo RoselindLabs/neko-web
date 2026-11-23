@@ -4,11 +4,12 @@ config_version = "1.0.0"
 
 [web]
 search_provider = "anysearch" # anysearch / exa
-manual_search_provider = "configured" # configured / jina_serp；只覆盖手动普通/批量搜索，Life后台沿用上项
+manual_search_provider = "configured" # configured / jina_serp / linkup_fast；只覆盖手动普通/批量搜索，Life后台沿用上项
 jina_search_engine = "google" # google / bing，核对返回引擎，不自动换源
 jina_proxy_url = "" # 可选Jina专用代理；留空沿用下方代理，不影响Exa/Firecrawl/Life
 extract_provider = "anysearch" # anysearch / firecrawl / jina，不自动切换
 exa_api_key = ""
+linkup_api_key = "" # Linkup fast + sourcedAnswer；仅显式选择 linkup_fast 时使用
 firecrawl_api_key = ""
 jina_api_key = "" # 可留空匿名，仅选jina时使用；供应商额度/收费自行管理
 
