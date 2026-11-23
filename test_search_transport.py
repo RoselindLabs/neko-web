@@ -126,7 +126,7 @@ class SearchTransportTests(IsolatedAsyncioTestCase):
         calls = []
         def reply(request):
             self.assertEqual(str(request.url), plugin.ANYSEARCH_ENDPOINT)
-            self.assertEqual(request.headers['X-Anysearch-Client'], 'neko-web/1.13.0')
+            self.assertEqual(request.headers['X-Anysearch-Client'], 'neko-web/1.14.0')
             calls.append(json.loads(request.content)['params']['arguments'])
             return httpx.Response(200, json={'result': {'content': [{'type': 'text', 'text': raw}]}})
         client = httpx.AsyncClient(transport=httpx.MockTransport(reply))

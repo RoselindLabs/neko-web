@@ -88,7 +88,7 @@ def _linkup_date(value):
         return False
 
 
-def _linkup_filters(filters):
+def linkup_filters(filters):
     """Translate search_filters' UTC day boundaries without widening them."""
     if filters.keys() - {'includeDomains', 'startPublishedDate', 'endPublishedDate'}:
         raise ProviderError('Linkup 不支持当前筛选', 'unsupported')
@@ -139,7 +139,7 @@ async def search_linkup_results(client, key, query, count, filters=None):
         raise ProviderError('Linkup 密钥缺失或格式无效', 'config_error')
     if type(count) is not int or not 1 <= count <= 10:
         raise ProviderError('搜索数量无效', 'invalid_request')
-    filters = _linkup_filters(filters or {})
+    filters = linkup_filters(filters or {})
     data = await post_json(client, 'https://api.linkup.so/v1/search', {'Authorization': 'Bearer ' + key},
                            {'q': query, 'depth': 'fast', 'outputType': 'sourcedAnswer', 'maxResults': count,
                             'includeInlineCitations': False, **filters})

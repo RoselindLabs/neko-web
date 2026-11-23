@@ -11,7 +11,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = (
     'plugin.py', 'providers.py', 'runtime.py', 'retrieval.py', 'search_preview.py', 'public_http.py',
-    'page.py', 'images.py', 'preview.py', 'originals.py', 'texts.py',
+    'dual_search.py', 'dual_evidence.py', 'page.py', 'images.py', 'preview.py', 'originals.py', 'texts.py',
     'automation_auth.py', 'automation_jobs.py', 'automation_retrieval.py', 'weather.py',
 )
 FILES = (*RUNTIME, '_manifest.json', 'README.md', 'CHANGELOG.md', 'LICENSE', 'config.example.toml')

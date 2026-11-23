@@ -8,7 +8,7 @@ import json
 from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from time import monotonic_ns
-from typing import Any, List, Literal
+from typing import Any, Dict, List, Literal
 from urllib.parse import urlparse
 
 import httpx
@@ -20,13 +20,15 @@ from .images import IMAGE_HEADERS, FetchPolicy, ImageFetchError, image_urls_in_d
 from .page import read_public_page
 from .public_http import PublicClient
 from .preview import PreviewPager
-from .providers import ProviderError, extract_firecrawl_document, extract_jina_document, post_json, validate_remote_target
+from .providers import ProviderError, extract_firecrawl_document, extract_jina_document, linkup_filters, post_json, validate_remote_target
 from .texts import MAX_SLICE_CHARS, TextRegistry, capture_document, text_result
 from .public_http import validate_url
 from .originals import OriginalRegistry
 from .runtime import FOLLOWUP_SCOPE_HINT, Deadline, WorkManager, bounded_text, scoped, tracked
 from .retrieval import (bounded_batch, collect_queries, error_status, render_batch_text, retrieve, search_filters, search_sources,
-                         MAX_SEARCH_CONCURRENCY, MAX_READ_PAGES)
+                         MAX_BATCH_RESULTS, MAX_SEARCH_CONCURRENCY, MAX_READ_PAGES)
+from .dual_search import ProviderOutcome, collect_dual
+from .dual_evidence import merge_dual
 from .search_preview import render_search_preview
 from .automation_auth import AuthError, read_keys, verify
 from .automation_jobs import JobError, JobService
@@ -35,7 +37,7 @@ from .weather import WeatherError, WeatherService
 
 
 ANYSEARCH_ENDPOINT = "https://api.anysearch.com/mcp"
-CLIENT_HEADER = "neko-web/1.13.0"
+CLIENT_HEADER = "neko-web/1.14.0"
 VERTICAL_DOMAINS = {
     "academic",
     "agriculture",
@@ -92,7 +94,7 @@ class WebConfig(PluginConfigBase):
     __ui_order__ = 1
 
     search_provider: Literal['anysearch', 'exa'] = Field(default='anysearch', description='普通搜索来源')
-    manual_search_provider: Literal['configured', 'jina_serp', 'linkup_fast'] = Field(
+    manual_search_provider: Literal['configured', 'jina_serp', 'linkup_fast', 'linkup_exa'] = Field(
         default='configured', description='仅普通/批量手动搜索覆盖；configured沿用搜索来源，Life后台不受影响',
         json_schema_extra={'label': '手动搜索来源覆盖'})
     jina_search_engine: Literal['google', 'bing'] = Field(default='google', description='Jina SERP搜索引擎，核对实际返回，不自动换源',
@@ -102,7 +104,7 @@ class WebConfig(PluginConfigBase):
     extract_provider: Literal['anysearch', 'firecrawl', 'jina'] = Field(default='anysearch', description='长文提取来源；显式选择，不自动换源')
     exa_api_key: str = Field(default='', description='Exa API Key，仅存服务器配置')
     linkup_api_key: str = Field(default='', repr=False,
-                                description='仅 linkup_fast 使用；一次搜索返回候选答案和来源摘录。',
+                                description='供 linkup_fast 或 linkup_exa 使用，返回候选答案和来源摘录。',
                                 json_schema_extra={'label': 'Linkup API Key', 'x-widget': 'password'})
     firecrawl_api_key: str = Field(default='', description='Firecrawl API Key，仅存服务器配置')
     jina_api_key: str = Field(default='', description='Jina Reader API Key，可留空匿名；仅选择jina时使用',
@@ -476,17 +478,46 @@ class NekoWebPlugin(MaiBotPlugin):
                           if type(timing.get(k)) is int)
         self.ctx.logger.info('neko_web.search %s', fields)
 
-    async def _manual_results(self, queries, count, filters, *, config, backend, scope, deadline=None):
+    async def _dual_results(self, client: httpx.AsyncClient, queries: List[str], count: int, filters: Dict[str, Any],
+                            config: WebConfig, scope: str, deadline: Deadline | None, cross_check: bool) -> str:
+        async def fetch(channel: str, query: str, limit: int, timing: Dict[str, int]) -> ProviderOutcome:
+            # Leave room for Exa while keeping the sources behind the Linkup answer together.
+            request_count = (limit + 1) // 2 if channel == 'linkup_fast' else limit
+            candidates = {}
+            sources, stats = await search_sources(client, config, query, request_count, filters,
+                deadline=deadline, backend=channel, timing=timing, answers=candidates)
+            status = 'partial' if stats['invalid'] else ('ok' if sources else 'no_results')
+            return ProviderOutcome(sources=sources, stats=stats, status=status, answer=candidates.get(query, ''))
+
+        pairs = await collect_dual(queries, count, fetch, self._search_slots, min(config.timeout_seconds, 60),
+            cross_check=cross_check, total_timeout=deadline.remaining() if deadline else None, observe=self._search_timing)
+        rows, answers = [], {}
+        limit = min(count, MAX_BATCH_RESULTS // len(queries))
+        for query, pair in zip(queries, pairs, strict=True):
+            row, answer = merge_dual(query, pair, limit, cross_check=cross_check)
+            rows.append(row)
+            if answer:
+                answers[query] = answer
+        return render_search_preview(rows, label='Linkup + Exa', registry=self._texts, scope=scope, answers=answers)
+
+    async def _manual_results(self, queries, count, filters, *, config, backend, scope, deadline=None, cross_check=False):
         """A single tool call owns the config, pool and (for structured results) preview scope."""
         started = monotonic_ns()
-        label = ('Linkup' if backend == 'linkup_fast' else
-                 f'Jina SERP ({config.jina_search_engine})' if backend == 'jina_serp' else 'Exa')
+        labels = {'linkup_exa': 'Linkup + Exa', 'linkup_fast': 'Linkup', 'jina_serp': f'Jina SERP ({config.jina_search_engine})'}
+        label = labels.get(backend, 'Exa')
         answers = {} if backend == 'linkup_fast' else None
 
         def failure(query, code):
             return query, [], {'invalid': 0, 'omitted': 0, 'duplicates': 0}, 'timeout' if code == 'deadline' else code
 
         try:
+            if backend == 'linkup_exa':
+                if not (config.linkup_api_key.strip() and config.exa_api_key.strip()):
+                    return '搜索状态：config_error；双源搜索需同时配置 Linkup 和 Exa 的密钥，未发起请求。'
+                try:
+                    linkup_filters(filters)  # Reject incompatible date boundaries before either paid request.
+                except ProviderError as exc:
+                    return f'搜索状态：{exc.code}；{exc}，未发起请求。'
             try:
                 client = self._search_client(config, jina=backend == 'jina_serp')
             except (httpx.InvalidURL, ValueError, ImportError):
@@ -501,6 +532,9 @@ class NekoWebPlugin(MaiBotPlugin):
                             return await self._call_api('search', {'query': query, 'max_results': limit},
                                                         config=config, client=client)
                         return await bounded_batch(queries, count, raw, self._search_slots, timeout, observe=self._search_timing)
+
+                    if backend == 'linkup_exa':
+                        return await self._dual_results(client, queries, count, filters, config, scope, deadline, cross_check)
 
                     async def structured(query, limit, timing):
                         sources, stats = await search_sources(client, config, query, limit, filters, deadline=deadline,
@@ -604,7 +638,9 @@ class NekoWebPlugin(MaiBotPlugin):
             ToolParameterInfo(name="published_before", param_type=ToolParamType.STRING,
                                description="Exa/Linkup 发布日期上限 YYYY-MM-DD；可留空", required=False),
             ToolParameterInfo(name="read_pages", param_type=ToolParamType.INTEGER,
-                                description="Exa/Jina 单问题可额外读前0–2篇原文，默认0；Linkup 快答留0", required=False),
+                               description="Exa/Jina 单问题可额外读前0–2篇原文，默认0；快答或双源留0", required=False),
+            ToolParameterInfo(name="cross_check", param_type=ToolParamType.BOOLEAN,
+                               description="普通查询省略；仅明确要求交叉核实时设 true，双源模式下等待两路证据。", required=False),
             ToolParameterInfo(
                 name="domain",
                 param_type=ToolParamType.STRING,
@@ -628,12 +664,14 @@ class NekoWebPlugin(MaiBotPlugin):
     @scoped
     async def handle_search_tool(
         self, queries=None, max_results=0, sites=None, published_after='', published_before='',
-        read_pages=0, domain='', sub_domain='', sub_domain_params=None, **kwargs,
+        read_pages=0, domain='', sub_domain='', sub_domain_params=None, cross_check=False, **kwargs,
     ):
         """One model entry; the existing tracked handlers own I/O and cancellation."""
         invalid = lambda message: {'success': False, 'status': 'invalid_request', 'content': message}
         if 'query' in kwargs:
             return invalid('搜索统一使用queries数组，不同时接收旧query参数。')
+        if type(cross_check) is not bool:
+            return invalid('cross_check 必须为布尔值。')
         if not isinstance(queries, list) or not 1 <= len(queries) <= 5:
             return invalid('queries须包含1–5个问题；单问题也用数组。')
         normalized = []
@@ -649,14 +687,14 @@ class NekoWebPlugin(MaiBotPlugin):
                 normalized[0], max_results=max_results, sites=sites,
                 published_after=published_after, published_before=published_before,
                 read_pages=read_pages, domain=domain, sub_domain=sub_domain,
-                sub_domain_params=sub_domain_params, **kwargs,
+                sub_domain_params=sub_domain_params, cross_check=cross_check, **kwargs,
             )
         if read_pages or domain or sub_domain or sub_domain_params:
             return {'success': False, 'status': 'unsupported',
                     'content': '多问题搜索不自动提取原文，也不接受专用数据源参数；请单独查询或读取选中的链接。'}
         return await self.handle_batch_search(
             normalized, max_results=max_results, sites=sites,
-            published_after=published_after, published_before=published_before, **kwargs,
+            published_after=published_after, published_before=published_before, cross_check=cross_check, **kwargs,
         )
 
     @tracked
@@ -672,6 +710,7 @@ class NekoWebPlugin(MaiBotPlugin):
         published_after: str = "",
         published_before: str = "",
         read_pages: int = 0,
+        cross_check: bool = False,
         **kwargs: Any,
     ) -> str:
         """搜索实时网页信息。"""
@@ -708,15 +747,17 @@ class NekoWebPlugin(MaiBotPlugin):
         vertical_error = self._vertical_arguments(arguments, domain, sub_domain, sub_domain_params)
         if vertical_error:
             return vertical_error
+        backend = self._manual_backend(config)
+        if cross_check and ('domain' in arguments or backend != 'linkup_exa'):
+            return '搜索状态：unsupported；交叉核实仅适用于 Linkup + Exa 普通搜索，未发起请求。'
         if 'domain' not in arguments:
-            backend = self._manual_backend(config)
-            if filters and backend not in {'exa', 'linkup_fast'}:
+            if filters and backend not in {'exa', 'linkup_fast', 'linkup_exa'}:
                 return '搜索状态：unsupported；此搜索来源不支持网站/日期筛选，未发起请求。'
-            if backend == 'linkup_fast' and read_pages:
-                return '搜索状态：unsupported；Linkup 快答只取答案和来源摘录。请省略 read_pages，需要正文时再用 neko_web_read。未发起请求。'
+            if backend in {'linkup_fast', 'linkup_exa'} and read_pages:
+                return '搜索状态：unsupported；快答与双源搜索不抓取正文。请省略 read_pages，需要正文时再用 neko_web_read。未发起请求。'
             if not read_pages and backend != 'anysearch':
                 return await self._manual_results([query], result_count, filters, config=config, backend=backend,
-                                                  scope=scope, deadline=deadline)
+                                                  scope=scope, deadline=deadline, cross_check=cross_check)
             try:
                 async with asyncio.timeout(95):
                     async with self._search_slots:
@@ -782,7 +823,7 @@ class NekoWebPlugin(MaiBotPlugin):
     @scoped
     async def handle_batch_search(self, queries: List[str] | None = None, max_results: int = 0,
                                   sites: List[str] | None = None, published_after: str = "",
-                                  published_before: str = "", **kwargs: Any) -> str:
+                                  published_before: str = "", cross_check: bool = False, **kwargs: Any) -> str:
         """并行搜索多个实时网页问题。"""
 
         disabled_message = self._check_enabled()
@@ -813,10 +854,12 @@ class NekoWebPlugin(MaiBotPlugin):
             return "AnySearch 批量搜索失败：max_results 必须是 1 到 10 之间的整数。"
 
         backend = self._manual_backend(config)
-        if filters and backend not in {'exa', 'linkup_fast'}:
+        if cross_check and backend != 'linkup_exa':
+            return '搜索状态：unsupported；交叉核实仅适用于 Linkup + Exa 普通搜索，未发起请求。'
+        if filters and backend not in {'exa', 'linkup_fast', 'linkup_exa'}:
             return '搜索状态：unsupported；此搜索来源不支持网站/日期筛选，未发起请求。'
         return await self._manual_results(normalized_queries, result_count, filters, config=config, backend=backend,
-                                          scope=self._text_scope(kwargs))
+                                          scope=self._text_scope(kwargs), cross_check=cross_check)
 
     @Tool(
         "neko_web_domains",
